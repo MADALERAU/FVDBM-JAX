@@ -1,0 +1,32 @@
+# Main Sim Loop
+for (iteration_steps){
+    # Calculate & Update Cell States
+    for cell in cells{
+        updateCellMacros() # density & velocity
+        updateCellEq()
+    }
+    # Calculate & Update Node States
+    for node in nodes{
+        updateNodalPDFs(){
+            calcCellNonEqs() # of all surrounding cells
+            calcEq() # Depending on boundary type
+            calcNodalNonEq() # weighted average of all cells
+            calcNodalPDF() # returns nodeEq + nodeNonEq
+
+        }
+    }
+    # Calculate & Update Face States
+    for face in faces{
+        updateFacePDFs(){
+            if face has ghosts{
+                updateGhostPDFs()
+            }
+            calcFacePDFs()
+        calculateFlux()
+        }
+    }
+    # Update Cell PDFs
+    for cell in cells{
+        updateCellPDFs()
+    }
+}

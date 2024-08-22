@@ -3,9 +3,8 @@ import jax.numpy as jnp
 from src.fvdbmDynamics import Dynamics
 from jax.typing import ArrayLike
 from jax import Array, jit
-from jax.tree_util import register_pytree_node_class
+from functools import partial
 
-@register_pytree_node_class
 class Element():
 
     # Static
@@ -18,14 +17,24 @@ class Element():
         self.vel = vel
 
     @classmethod
-    def ones_init(cls): # for init w/ pdf as ones
+    def pdf_init(cls,pdf):
         temp = cls.__new__(cls)
-        temp.pdf = cls.dynamics.ones_pdf()
-        temp.rho = 0
-        temp.vel = jnp.asarray([0,0])
+        temp.pdf = pdf
+        # temp.rho = None
+        # temp.vel = None
         temp.calc_macro()
         return temp
 
+    @classmethod
+    def ones_init(cls): # for init w/ pdf as ones
+        temp = cls.__new__(cls)
+        temp.pdf = cls.dynamics.ones_pdf()
+        # temp.rho = None
+        # temp.vel = None
+        temp.calc_macro()
+        return temp
+
+    ### JAX PyTree Methods ###
     def tree_flatten(self):
         children = (self.pdf,self.rho,self.vel)
         aux_data = {}
@@ -34,33 +43,35 @@ class Element():
     @classmethod
     def tree_unflatten(cls,aux_data,children):
         return cls(*children,**aux_data)
+    ### END ###
 
     def __str__(self):
-        return f'Element(Density: {self.rho}, Velocity: {self.vel.squeeze()})'
+        return f'{(type(self).__name__)}(Density: {self.rho}, Velocity: {self.vel.squeeze()})'
     
     # Class Methods
 
-    def density(self): # returns calculated density
-        return jnp.sum(self.pdf)
+    @partial(jax.jit, static_argnums = 0)
+    def density(self,pdf): # returns calculated density
+        return jnp.sum(pdf)
     
-    def velocity(self): # returns calculated velocity
-        return jnp.dot(self.dynamics.KSI.T,self.pdf)/self.rho
+    @partial(jax.jit, static_argnums = 0)
+    def velocity(self,pdf,rho): # returns calculated velocity
+        return jnp.dot(self.dynamics.KSI.T,pdf)/rho
+    
+    def equilibrium(self,rho,vel): # returns equilibrium pdf based on current pdf
+        return self.dynamics.calc_eq(rho,vel)
     
     def calc_macro(self): # calculates & sets density & velocity
-        self.rho = self.density()
-        self.vel = self.velocity()
-
-    def equilibrium(self): # returns equilibrium pdf based on current pdf
-        return self.dynamics.calc_eq(self.rho,self.vel)
+        self.rho = self.density(self.pdf)
+        self.vel = self.velocity(self.pdf,self.rho)
     
     def calc_eq(self): # calculated & sets equilibrium pdf as current pdf
-        self.pdf = self.equilibrium()
+        self.pdf = self.equilibrium(self.rho,self.vel)
 
-@register_pytree_node_class
 class Cell(Element):
 
     # Init/Jax Methods
-    def __init__(self,pdf:ArrayLike,rho:ArrayLike,vel:ArrayLike,pdf_eq:ArrayLike,faces_index:ArrayLike):
+    def __init__(self, pdf: ArrayLike, rho: ArrayLike, vel: ArrayLike, pdf_eq: ArrayLike, faces_index: ArrayLike):
         super().__init__(pdf,rho,vel)
 
         # Defining Cell Vars.
@@ -71,17 +82,21 @@ class Cell(Element):
         self.faces_index = faces_index
 
     @classmethod
-    def eq_init(cls,pdf:ArrayLike,rho:ArrayLike,vel:ArrayLike,faces_index:ArrayLike):
+    def pdf_init(cls,pdf:ArrayLike,faces_index:ArrayLike):
         temp = cls.__new__(cls)
-        temp.super_init(pdf,rho,vel)
-        temp.faces_index = faces_index
-        #calculated eq pdf
-        temp.pdf_eq = temp.dynamics.ones_pdf()
-        temp.pdf_eq = temp.equilibrium()
 
+        temp.pdf = pdf
+        temp.rho = temp.density(pdf)
+        temp.vel = temp.velocity(pdf,temp.rho)
+
+        temp.pdf_eq = temp.equilibrium(temp.rho,temp.vel)
+        temp.faces_index = faces_index
+        return temp
+        
     def super_init(self,pdf,rho,vel):
         super().__init__(pdf,rho,vel)
 
+    ### JAX PyTree Methods ###
     def tree_flatten(self):
         children, aux_data = super().tree_flatten()
         children += (self.pdf_eq,)
@@ -91,53 +106,89 @@ class Cell(Element):
     @classmethod
     def tree_unflatten(cls, aux_data, children):
         return cls(*children,**aux_data)
+    ### END ###
     
     # Class Methods
     def get_neq_pdf(self): # returns non-equilibrium pdf
         return self.pdf-self.pdf_eq
     
-    def calc_eq(self,Faces:ArrayLike): # calculates eq using face flux
+    def calc_eq(self):
+        self.pdf_eq = self.equilibrium(self.rho,self.vel)
+
+    def calc_eq_from_flux(self,faces:ArrayLike): # calculates eq using face flux
+        pass
+
+    def update_Cell(self):
         pass
     
 class Face(Element):
 
     #Init/Jax Methods   
     def __init__(self,pdf:ArrayLike,rho:ArrayLike,vel:ArrayLike,
-                 flux:ArrayLike,node_index:ArrayLike,stencil_cell_index:ArrayLike,stencil_dist: ArrayLike):
+                 flux:ArrayLike,nodes_index:ArrayLike,stencil_cells_index:ArrayLike,stencil_dists: ArrayLike):
         super().__init__(pdf,rho,vel)
         # Defining Face Vars.
 
         self.flux = flux
 
         # STATIC VARIABLES #
-        self.node_index = node_index
-        self.stencil_cell_index = stencil_cell_index
-        self.stencil_dist = stencil_dist
+        self.nodes_index = nodes_index
+        self.stencil_cells_index = stencil_cells_index
+        self.stencil_dists = stencil_dists
 
+    ### JAX PyTree Methods ###
     def tree_flatten(self):
         children,aux_data = super().tree_flatten()
         children += (self.flux,)
-        aux_data.update({'node_index':self.node_index,'stencil_cell_index':self.stencil_cells_index,'stencil_dist': self.stencil_dist})
+        aux_data.update({'nodes_index':self.nodes_index,'stencil_cells_index':self.stencil_cells_index,'stencil_dists': self.stencil_dists})
         return (children,aux_data)
     
     @classmethod
     def tree_unflatten(cls, aux_data, children):
         return cls(*children, **aux_data)
+    ### END ###
     
     # Class Methods
-    def calc_eq(self): # via stenciling
+    def calc_eq_from_stencil(self): # via stenciling
         pass
     
     def calc_flux(self):
         pass
 
+    def update_Face(self):
+        pass
+
 class Node(Element):
 
-    def __init__(self,pdf:ArrayLike,rho:ArrayLike,vel:ArrayLike):
+    def __init__(self,pdf:ArrayLike,rho:ArrayLike,vel:ArrayLike,cells_index: ArrayLike, cell_dists: ArrayLike):
         super().__init__(pdf,rho,vel)
 
         # Defining Node Vars.
-        self.cells: Array[Cell] = []
-        self.cell_dists: Array[float] = []
+        self.cells_index = cells_index
+        self.cell_dists = cell_dists
     
+    ### JAX PyTree Methods ###
+    def tree_flatten(self):
+        children, aux_data = super().tree_flatten()
+        children += (self.pdf_eq,)
+        aux_data.update({'cells_index': self.cells_index,'cell_dists': self.cell_dists})
+        return (children,aux_data)
     
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        return cls(*children,**aux_data)
+    ### END ###
+
+    # Class Methods
+    def calc_NonEq(self,cells):
+        pass
+
+    def set_boundary_macros(self): # should be implemented in subclass
+        pass
+
+    def calc_NodalPDF(self):
+        return self.calc_NonEq()+self.equilibrium(self.rho,self.vel)
+
+    def update_Node(self):
+        self.set_boundary_macros()
+        self.pdf = self.calc_NodalPDF
