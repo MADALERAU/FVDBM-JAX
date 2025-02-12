@@ -1,8 +1,10 @@
 import jax
 
-from src.fvdbmElements import *
-from src.fvdbmDynamics import *
-from src.fvdbmEnvironment import *
+import sys
+sys.path.append(".")
+from src.elements import *
+from src.dynamics import *
+from src.environment import *
 
 from utils.test_utils import *
 
