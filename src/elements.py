@@ -36,6 +36,12 @@ class Element():
         # temp.vel = None
         temp.calc_macro()
         return temp
+    
+    ### Custom PyTree Methods ###
+    def flatten(self):
+        dynamic = {"pdf": self.pdf,"rho": self.rho,"vel":self.vel}
+        static = {}
+        return dynamic, static
 
     ### JAX PyTree Methods ###
     def tree_flatten(self):
@@ -71,14 +77,55 @@ class Element():
     def calc_eq(self): # calculated & sets equilibrium pdf as current pdf
         self.pdf = self.equilibrium(self.rho,self.vel)
 
-class ElementContainer:
-    def __init__(self,elements: list[Element]):
+class Container:
+    def __init__(self,name:str):
+        self.name = name
+    def flatten(self):
+        pass
+
+class ElementContainer(Container):
+    def __init__(self,name:str, elements: list[Element]):
+        super().__init__(name)
         self.elements = elements
 
     def flatten(self):
         assert all(self.elements[0].__class__ == element.__class__ for element in self.elements), "ElementContainer: Element types differ"
         assert len(self.elements) > 0, "ElementContainer: Empty List"
-        return pad_stack_tree([element.__dict__ for element in self.elements])
+        
+        dynamic,static = zip(*[element.flatten() for element in self.elements])
+
+        return pad_stack_tree(dynamic),pad_stack_tree(static)
+    
+class MultiElementContainer(Container):
+    def __init__(self,name:str,*args:Container):
+        super().__init__(name)
+        self.containers = [arg for arg in args]
+
+    @classmethod
+    def create(cls,name:str,*args:Container):
+
+        temp = cls.__init__(name,[arg for arg in args])
+        return temp
+
+    def flatten(self):
+        dynamic = {}
+        static = {}
+        for container in self.containers:
+            dynamic[container.name],static[container.name] = container.flatten()
+        return dynamic,static
+    
+class NodeContainer(ElementContainer):
+    # Class Var
+    type_key = {0: "Internal",
+                1: "Velocity",
+                2: "Pressure"}
+    def __init__(self,name:str,elements: list[Element]):
+        super().__init__(name,elements)
+    
+    def flatten(self):
+        dynamic, static = super().flatten()
+        static, dynamic = splice_split_2dict(static,dynamic,'type',self.type_key)
+        return dynamic,static
 
 class Cell(Element):
 
@@ -108,6 +155,13 @@ class Cell(Element):
     def super_init(self,pdf,rho,vel):
         super().__init__(pdf,rho,vel)
 
+    ### Custom PyTree Methods ###
+    def flatten(self):
+        dynamic, static = super().flatten()
+        dynamic.update({"pdf_eq":self.pdf_eq})
+        static.update({"faces_index":self.faces_index})
+        return dynamic, static
+
     ### JAX PyTree Methods ###
     def tree_flatten(self):
         children, aux_data = super().tree_flatten()
@@ -127,12 +181,6 @@ class Cell(Element):
     def calc_eq(self):
         self.pdf_eq = self.equilibrium(self.rho,self.vel)
 
-    def calc_eq_from_flux(self,faces:ArrayLike): # calculates eq using face flux
-        pass
-
-    def update_Cell(self):
-        pass
-    
 class Face(Element):
 
     #Init/Jax Methods   
@@ -162,6 +210,13 @@ class Face(Element):
         temp.stencil_dists = stencil_dists
         return temp
 
+    ### Custom PyTree Methods ###
+    def flatten(self):
+        dynamic, static = super().flatten()
+        dynamic.update({"flux":self.flux})
+        static.update({"nodes_index":self.nodes_index,"stencil_cells_index":self.stencil_cells_index,"stencil_dists":self.stencil_cells_index})
+        return dynamic, static
+
     ### JAX PyTree Methods ###
     def tree_flatten(self):
         children,aux_data = super().tree_flatten()
@@ -173,44 +228,41 @@ class Face(Element):
     def tree_unflatten(cls, aux_data, children):
         return cls(*children, **aux_data)
     ### END ###
-    
-    # Class Methods
-    def calc_eq_from_stencil(self): # via stenciling
-        pass
-    
-    def calc_flux(self):
-        pass
-
-    def update_Face(self):
-        pass
 
 class Node(Element):
 
-    def __init__(self,pdf:ArrayLike,rho:ArrayLike,vel:ArrayLike,cells_index: ArrayLike, cell_dists: ArrayLike):
+    def __init__(self,pdf:ArrayLike,rho:ArrayLike,vel:ArrayLike,type:ArrayLike, cells_index: ArrayLike, cell_dists: ArrayLike):
         super().__init__(pdf,rho,vel)
 
         # Defining Node Vars.
+        self.type = type 
         self.cells_index = cells_index
         self.cell_dists = cell_dists
 
     @classmethod
-    def pdf_init(cls,pdf:ArrayLike,cells_index:ArrayLike,cells_dists: ArrayLike):
+    def pdf_init(cls,pdf:ArrayLike,type:int,cells_index:ArrayLike,cells_dists: ArrayLike):
         temp = cls.__new__(cls)
 
         temp.pdf = pdf
         temp.rho = temp.density(pdf)
         temp.vel = temp.velocity(pdf,temp.rho)
 
-        temp.flux = jnp.zeros_like(pdf)
+        temp.type = type
         temp.cells_index = cells_index
         temp.cell_dists = cells_dists
         return temp
+    
+    ### Custom PyTree Methods ###
+    def flatten(self):
+        dynamic, static = super().flatten()
+        static.update({"type":self.type,"cells_index":self.cells_index,"cell_dists":self.cell_dists})
+        return dynamic, static
     
     ### JAX PyTree Methods ###
     def tree_flatten(self):
         children, aux_data = super().tree_flatten()
         children += (self.pdf_eq,)
-        aux_data.update({'cells_index': self.cells_index,'cell_dists': self.cell_dists})
+        aux_data.update({'type':self.type,'cells_index': self.cells_index,'cell_dists': self.cell_dists})
         return (children,aux_data)
     
     @classmethod
@@ -219,15 +271,3 @@ class Node(Element):
     ### END ###
 
     # Class Methods
-    def calc_NonEq(self,cells):
-        pass
-
-    def set_boundary_macros(self): # should be implemented in subclass
-        pass
-
-    def calc_NodalPDF(self):
-        return self.calc_NonEq()+self.equilibrium(self.rho,self.vel)
-
-    def update_Node(self):
-        self.set_boundary_macros()
-        self.pdf = self.calc_NodalPDF

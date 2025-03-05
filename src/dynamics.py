@@ -17,7 +17,18 @@ class Dynamics():
 
     def ones_pdf(self):
         return jnp.ones(self.NUM_QUIVERS)
+    
+    def density(self,pdf: ArrayLike): # returns calculated density
+        return jnp.sum(pdf)
+    
+    def velocity(self,pdf:ArrayLike,rho:ArrayLike): # returns calculated velocity
+        return jnp.dot(self.KSI.T,pdf)/rho
 
+    def calc_macro(self,pdf: ArrayLike):
+        rho = self.density(pdf)
+        vel = self.velocity(pdf,rho)
+        return rho,vel
+### D2Q9 Dynamics ###
 class D2Q9(Dynamics):
     DIM = 2
     NUM_QUIVERS = 9
@@ -35,7 +46,5 @@ class D2Q9(Dynamics):
     def __init__(self):
         super().__init__()
     
-    @partial(jax.jit,static_argnums=0)
     def calc_eq(self,rho: ArrayLike,vel:ArrayLike):
         return self.W*rho*(1+(jnp.dot(self.KSI,vel))/(self.C**2)+(jnp.dot(self.KSI,vel))**2/(2*self.C**4)-(jnp.dot(vel,vel))/(2*self.C**2))
-    
