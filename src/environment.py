@@ -4,6 +4,7 @@ sys.path.append(".")
 from src.elements import *
 from src.dynamics import D2Q9
 from src.methods import *
+from src.containers import *
 
 class Environment(MultiElementContainer):
     # Static Class Var.
