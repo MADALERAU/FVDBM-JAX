@@ -1,3 +1,7 @@
+"""
+The test utils functions are designed to streamline the testing process for various source code functions.
+"""
+
 import jax
 import jax.numpy as jnp
 

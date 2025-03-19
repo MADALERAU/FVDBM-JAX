@@ -1,3 +1,6 @@
+"""
+elements
+"""
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
@@ -9,18 +12,46 @@ from src.dynamics import Dynamics
 from utils.utils import *
 
 class Element():
-
+    """
+    Generic class for all Cells, Nodes, Faces, Etc
+    """
     # Static
     dynamics: Dynamics
+    """
+    Defined by the `FVDBMSolver.src.dynamics` classes. Sets preference for collision and lattice to predefine relevant array sizes and methods.
+    """
 
     # Init/Jax Methods
     def __init__(self,pdf,rho,vel):
+        """
+        Base initialization classes for flexible JAX Pytree handling.
+        ___
+        **Notes:** The __init__ function should not be used in implementation.
+        """
         self.pdf = pdf
+        """
+        @private
+        """
         self.rho = rho
+        """
+        @private
+        """
         self.vel = vel
+        """
+        @private
+        """
 
     @classmethod
-    def pdf_init(cls,pdf):
+    def pdf_init(cls,pdf:jax.Array):
+        """
+        Creates an Element instance using a given PDF. Defines element density and velocity from input PDF.
+        ___
+        **Parameters:**
+        - **pdf** (ArrayLike): Input PDF.
+
+        **Returns:** A new Element.
+        ___
+        """
         temp = cls.__new__(cls)
         temp.pdf = pdf
         # temp.rho = None
@@ -30,6 +61,12 @@ class Element():
 
     @classmethod
     def ones_init(cls): # for init w/ pdf as ones
+        """
+        Initializes an Element instance with a PDF of ones. Defines element density and velocity from ones PDF.
+        ___
+        **Returns:** A new Element.
+        ___
+        """
         temp = cls.__new__(cls)
         temp.pdf = cls.dynamics.ones_pdf()
         # temp.rho = None
@@ -39,18 +76,32 @@ class Element():
     
     ### Custom PyTree Methods ###
     def flatten(self):
+        """
+        Flattens the class element into a dynamic and static dictionary
+        ___
+        **Returns:**
+        - **dynamic** (Dict): dynamic variables of element in Dictionary form.
+        - **static** (Dict): static variables of element in Dictionary form.
+        ___
+        """
         dynamic = {"pdf": self.pdf,"rho": self.rho,"vel":self.vel}
         static = {}
         return dynamic, static
 
     ### JAX PyTree Methods ###
     def tree_flatten(self):
+        """
+        @private JAX Pytree Handling Method
+        """
         children = (self.pdf,self.rho,self.vel)
         aux_data = {}
         return(children,aux_data)
     
     @classmethod
     def tree_unflatten(cls,aux_data,children):
+        """
+        @private JAX Pytree Handling Method
+        """
         return cls(*children,**aux_data)
     ### END ###
 

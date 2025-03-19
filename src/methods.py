@@ -1,3 +1,7 @@
+"""
+methods
+"""
+
 from src.dynamics import *
 from utils.utils import *
 

@@ -1,3 +1,6 @@
+"""
+Utility Functions for Handling Pytrees, Computations,Etc
+"""
 import jax.numpy as jnp
 import jax
 
