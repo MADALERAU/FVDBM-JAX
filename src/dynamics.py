@@ -39,3 +39,28 @@ class D2Q9(Dynamics):
     def calc_eq(self,rho: ArrayLike,vel:ArrayLike):
         return self.W*rho*(1+(jnp.dot(self.KSI,vel))/(self.C**2)+(jnp.dot(self.KSI,vel))**2/(2*self.C**4)-(jnp.dot(vel,vel))/(2*self.C**2))
     
+class D2Q13(Dynamics):
+    DIM = 2
+    NUM_QUIVERS = 13
+    KSI = jnp.array([[0,0],  # center
+                     [1,0],  # right
+                     [0,1],  # top
+                     [-1,0], # left
+                     [0,-1], # bottom
+                     [1,1],  # top-right
+                     [-1,1], # top-left
+                     [-1,-1],# bot-left
+                     [1,-1], # bot-right
+                     [2,0],  # right-double size
+                     [0,2],  # top-double size
+                     [-2,0], # left-double size
+                     [0,-2]])# bottom-double size
+    W = jnp.array([3/8,1/12,1/12,1/12,1/12,1/16,1/16,1/16,1/16,1/96,1/96,1/96,1/96])
+    C = 1/jnp.sqrt(2)
+    def __init__(self):
+        super().__init__()
+    
+    @partial(jax.jit,static_argnums=0)
+    def calc_eq(self,rho: ArrayLike,vel:ArrayLike):
+        return self.W*rho*(1+(jnp.dot(self.KSI,vel))/(self.C**2)+(jnp.dot(self.KSI,vel))**2/(2*self.C**4)-(jnp.dot(vel,vel))/(2*self.C**2)+(jnp.dot(self.KSI,vel))**3/(2*self.C**6)-3*(jnp.dot(self.KSI,vel))*(jnp.dot(vel,vel))/(2*self.C**4))
+    
