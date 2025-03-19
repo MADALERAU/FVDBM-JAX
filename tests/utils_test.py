@@ -25,4 +25,14 @@ def pad_stack_test():
     
     return True
 
+def extrapolate_test():
+    d = jnp.asarray([1,1,2,2,-1,-1])
+    x = jnp.asarray([5,10,2,7,0,0])[...,jnp.newaxis]
+    extrap = extrapolate(x,d)
+
+    assert extrap == jnp.sum(x[0:4]/d[0:4,jnp.newaxis])/jnp.sum(1/d[0:4],jnp.newaxis)
+    return extrap
+
+
 pad_stack_test()
+extrapolate_test()
