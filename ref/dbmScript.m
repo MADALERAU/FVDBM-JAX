@@ -18,7 +18,7 @@ Ksi = [0 1 0 -1 0 1 -1 -1 1;...
        0 0 1 0 -1 1 1 -1 -1]; % velocity vectors in each dir
 w = [4/9 1/9 1/9 1/9 1/9 1/36 1/36 1/36 1/36]; % weights in each dir
 n = [0,-1,0,1;...
-    1,0,-1,0]; %NWSE
+     1,0,-1,0]; %NWSE
 
 f_cc = ones(N_y,N_x,9); % PDF @ center cell
 f_surfvert = ones(N_y, N_x+1, 9);   % PDF @ Vertical Surfaces(Flux Calculation)

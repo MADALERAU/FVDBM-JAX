@@ -133,7 +133,23 @@ def splice_split_2dict(x: dict, y: dict, k: str, type_guide=None):
     """
     x, y, types = split_2dict(x, y, k)
     if type_guide is not None:
+        none_type = type_guide.copy()
+        for type in types:
+            none_type.pop(int(type))
         types = [type_guide[int(k)] for k in types]
     else:
         types = [int(k) for k in types]
-    return {k: v for k, v in zip(types, x)}, {k: v for k, v in zip(types, y)}
+        none_type = {}
+    x_z = {key: jnp.zeros((1, value.shape[-1])) for key, value in x[0].items()}
+    y_z = {key: jnp.zeros((1, value.shape[-1])) for key, value in y[0].items()}
+    x = {k: v for k, v in zip(types, x)}
+    y = {k: v for k, v in zip(types, y)}
+    x.update({v:x_z for k,v in none_type.items()})
+    y.update({v:y_z for k,v in none_type.items()})
+    return x,y
+
+def extrap_pdf(pdf1,pdf2,extrap_dist,pdf2_dist):
+    return pdf1 + (pdf1-pdf2)*(extrap_dist/pdf2_dist)
+
+def interp_pdf(pdf,dist):
+    return jax.vmap(weighted_avg,in_axes=(0,None))(pdf,1./dist)

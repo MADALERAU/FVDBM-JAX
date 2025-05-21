@@ -49,18 +49,10 @@ class Environment(MultiElementContainer):
         return cls(*children,**aux_data)
     ### END ###
     
-    def step(self,params): # one iteration of FVDBM
-
-        # Temp: Later update with parallel loops
-        for cell in self.cells:
-            cell.calc_macro(self)
-            cell.calc_eq(self)
-        
-        for node in self.nodes:
-            node.update_Node()
-        
-        for face in self.faces:
-            face.update_Face()
-        
-        for cell in self.cells:
-            cell.update_Cell()
+    def step(self,params,config): # one iteration of FVDBM
+        params = self.methods.calc_cell_macros(params,config)
+        params = self.methods.calc_cell_eqs(params,config)
+        params = self.methods.calc_node_pdfs(params,config)
+        params = self.methods.calc_face_pdfs(params,config)
+        params = self.methods.calc_cell_pdfs(params,config)
+        return params

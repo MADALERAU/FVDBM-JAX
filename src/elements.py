@@ -132,7 +132,7 @@ class Element():
 class Cell(Element):
 
     # Init/Jax Methods
-    def __init__(self, pdf: ArrayLike, rho: ArrayLike, vel: ArrayLike, pdf_eq: ArrayLike, faces_index: ArrayLike):
+    def __init__(self, pdf: ArrayLike, rho: ArrayLike, vel: ArrayLike, pdf_eq: ArrayLike, faces_index: ArrayLike,faces_n: ArrayLike):
         super().__init__(pdf,rho,vel)
 
         # Defining Cell Vars.
@@ -141,9 +141,10 @@ class Cell(Element):
         # STATIC VARIABLES #
         #define faces in cell # should be an ArrayLike['int']
         self.faces_index = faces_index
+        self.faces_n = faces_n # n_facesx1
 
     @classmethod
-    def pdf_init(cls,pdf:ArrayLike,faces_index:ArrayLike):
+    def pdf_init(cls,pdf:ArrayLike,faces_index:ArrayLike,faces_n:ArrayLike):
         temp = cls.__new__(cls)
 
         temp.pdf = pdf
@@ -152,6 +153,7 @@ class Cell(Element):
 
         temp.pdf_eq = temp.equilibrium(temp.rho,temp.vel)
         temp.faces_index = faces_index
+        temp.faces_n = faces_n
         return temp
         
     def super_init(self,pdf,rho,vel):
@@ -161,14 +163,14 @@ class Cell(Element):
     def flatten(self):
         dynamic, static = super().flatten()
         dynamic.update({"pdf_eq":self.pdf_eq})
-        static.update({"faces_index":self.faces_index})
+        static.update({"faces_index":self.faces_index,"faces_n":self.faces_n})
         return dynamic, static
 
     ### JAX PyTree Methods ###
     def tree_flatten(self):
         children, aux_data = super().tree_flatten()
         children += (self.pdf_eq,)
-        aux_data.update({'faces_index': self.faces_index})
+        aux_data.update({'faces_index': self.faces_index,"faces_n":self.faces_n})
         return (children,aux_data)
     
     @classmethod
@@ -187,7 +189,7 @@ class Face(Element):
 
     #Init/Jax Methods   
     def __init__(self,pdf:ArrayLike,rho:ArrayLike,vel:ArrayLike,
-                 flux:ArrayLike,nodes_index:ArrayLike,stencil_cells_index:ArrayLike,stencil_dists: ArrayLike):
+                 flux:ArrayLike,nodes_index:ArrayLike,stencil_cells_index:ArrayLike,stencil_dists: ArrayLike,n: ArrayLike,L: ArrayLike):
         super().__init__(pdf,rho,vel)
         # Defining Face Vars.
 
@@ -197,9 +199,11 @@ class Face(Element):
         self.nodes_index = nodes_index
         self.stencil_cells_index = stencil_cells_index
         self.stencil_dists = stencil_dists
+        self.n = n
+        self.L = L
 
     @classmethod
-    def pdf_init(cls,pdf:ArrayLike,nodes_index:ArrayLike,stencil_cells_index: ArrayLike,stencil_dists = ArrayLike):
+    def pdf_init(cls,pdf:ArrayLike,nodes_index:ArrayLike,stencil_cells_index: ArrayLike,stencil_dists: ArrayLike,n: ArrayLike,L:ArrayLike):
         temp = cls.__new__(cls)
 
         temp.pdf = pdf
@@ -210,20 +214,22 @@ class Face(Element):
         temp.nodes_index = nodes_index
         temp.stencil_cells_index = stencil_cells_index
         temp.stencil_dists = stencil_dists
+        temp.n = n
+        temp.L = L
         return temp
 
     ### Custom PyTree Methods ###
     def flatten(self):
         dynamic, static = super().flatten()
         dynamic.update({"flux":self.flux})
-        static.update({"nodes_index":self.nodes_index,"stencil_cells_index":self.stencil_cells_index,"stencil_dists":self.stencil_cells_index})
+        static.update({"nodes_index":self.nodes_index,"stencil_cells_index":self.stencil_cells_index,"stencil_dists":self.stencil_dists,"n":self.n,"L":self.L})
         return dynamic, static
 
     ### JAX PyTree Methods ###
     def tree_flatten(self):
         children,aux_data = super().tree_flatten()
         children += (self.flux,)
-        aux_data.update({'nodes_index':self.nodes_index,'stencil_cells_index':self.stencil_cells_index,'stencil_dists': self.stencil_dists})
+        aux_data.update({'nodes_index':self.nodes_index,'stencil_cells_index':self.stencil_cells_index,'stencil_dists': self.stencil_dists,"n":self.n,"L":self.L})
         return (children,aux_data)
     
     @classmethod

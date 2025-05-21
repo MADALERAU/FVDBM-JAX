@@ -17,6 +17,12 @@ class Dynamics():
     KSI: Array   # Matrix containing Define in sub-class
     W: Array     # Define in sub-class
 
+    tau: Array
+    delta_t: Array
+
+    def __init__(self):
+        pass
+
     def calc_eq(self,rho: ArrayLike,vel:ArrayLike):# Calculate Eq
         pass
 
@@ -33,6 +39,7 @@ class Dynamics():
         rho = self.density(pdf)
         vel = self.velocity(pdf,rho)
         return rho,vel
+
 ### D2Q9 Dynamics ###
 class D2Q9(Dynamics):
     DIM = 2
@@ -48,8 +55,10 @@ class D2Q9(Dynamics):
                      [1,-1]])# bot-right
     W = jnp.array([4/9,1/9,1/9,1/9,1/9,1/36,1/36,1/36,1/36])
     C = 1/jnp.sqrt(3)
-    def __init__(self):
+    def __init__(self,tau,delta_t):
         super().__init__()
+        self.tau = tau
+        self.delta_t = delta_t
     
     def calc_eq(self,rho: ArrayLike,vel:ArrayLike):
         return self.W*rho*(1+(jnp.dot(self.KSI,vel))/(self.C**2)+(jnp.dot(self.KSI,vel))**2/(2*self.C**4)-(jnp.dot(vel,vel))/(2*self.C**2))
