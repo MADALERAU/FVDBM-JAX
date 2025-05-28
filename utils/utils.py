@@ -40,7 +40,7 @@ def weighted_avg(x, w):
     Returns:
         float: The weighted average of x using weights w.
     """
-    return jnp.sum(x * w[..., jnp.newaxis]) / jnp.sum(w)
+    return jnp.sum(x * w[..., jnp.newaxis],axis=0) / jnp.sum(w[...,jnp.newaxis],axis=0)
 
 def extrapolate(x: jax.typing.ArrayLike, d: jax.typing.ArrayLike):
     """
@@ -152,4 +152,4 @@ def extrap_pdf(pdf1,pdf2,extrap_dist,pdf2_dist):
     return pdf1 + (pdf1-pdf2)*(extrap_dist/pdf2_dist)
 
 def interp_pdf(pdf,dist):
-    return jax.vmap(weighted_avg,in_axes=(0,None))(pdf,1./dist)
+    return weighted_avg(pdf,1./dist)

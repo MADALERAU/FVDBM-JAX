@@ -112,7 +112,7 @@ class Element():
 
     @partial(jax.jit, static_argnums = 0)
     def density(self,pdf): # returns calculated density
-        return jnp.sum(pdf)
+        return jnp.sum(pdf,keepdims=True)
     
     @partial(jax.jit, static_argnums = 0)
     def velocity(self,pdf,rho): # returns calculated velocity

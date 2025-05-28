@@ -55,6 +55,8 @@ class Methods:
         faces_n = config["cells"]["faces_n"]
         fluxes = jax.vmap(self.get_face_flux,in_axes=(None,0,0))(params,faces_ind,faces_n)
         flux = jnp.sum(fluxes)
+        print(flux)
+        print(params["cells"]["pdf"])
         return params["cells"]["pdf"]+self.dynamics.delta_t/self.dynamics.tau*(params["cells"]["pdf_eq"]-params["cells"]["pdf"])-flux
     
     def calc_cell_pdfs(self,params,config):
@@ -82,9 +84,10 @@ class Methods:
         params["nodes"] = node_params
         config["nodes"] = node_config
         cell_dists = config["nodes"]["cell_dists"]
-        rho = extrapolate(self.get_cell_vels(params,config["nodes"]["cells_index"]),cell_dists)
+        rho = extrapolate(self.get_cell_rhos(params,config["nodes"]["cells_index"]),cell_dists)
         vel = params["nodes"]["vel"]
         params["nodes"]["pdf"] = self.dynamics.calc_eq(rho,vel) + self.calc_node_neq(params,config)
+        params["nodes"]["rho"] = rho
         return params["nodes"]
     
 ### Master node function
@@ -105,7 +108,7 @@ class Methods:
         return jax.lax.select(index==-1,jnp.zeros((params["cells"]["vel"].shape[-1])),params["cells"]["vel"][index])
 
     def get_cell_rho(self,params,index):
-        return jax.lax.select(index==-1,jnp.zeros((params["cells"]["rho"].shape[-1])),params["cells"]["rho"][index])
+        return jax.lax.select(index==-1,jnp.asarray([0.]),params["cells"]["rho"][index])
 
     def get_cell_neqs(self,params,indices):
         return jax.vmap(self.get_cell_neq,in_axes=(None,0))(params,indices)
@@ -113,7 +116,7 @@ class Methods:
     def get_cell_vels(self,params,indices):
         return jax.vmap(self.get_cell_vel,in_axes=(None,0))(params,indices)
     
-    def get_class_rhos(self,params,indices):
+    def get_cell_rhos(self,params,indices):
         return jax.vmap(self.get_cell_rho,in_axes=(None,0))(params,indices)
     
 ## Face Methods
@@ -136,12 +139,13 @@ class Methods:
         pdf = jnp.zeros_like(left_cell_pdf)
 
         norm = jnp.dot(self.dynamics.KSI,config["faces"]["n"])
-        interp_cell = interp_pdf(jnp.stack([left_cell_pdf,right_cell_pdf],axis=-1),cells_dist)
+        interp_cell = interp_pdf(jnp.stack([left_cell_pdf,right_cell_pdf],axis=0),cells_dist)
 
         pdf = jnp.where(norm>0,left_cell_pdf,right_cell_pdf)
+
         pdf = jnp.where(norm==0,interp_cell,pdf)
 
-        flux = params["faces"]["pdf"]*jnp.matmul(self.dynamics.KSI,config["faces"]["n"])*config["faces"]["L"]
+        flux = pdf*jnp.matmul(self.dynamics.KSI,config["faces"]["n"])*config["faces"]["L"]
         return pdf,flux
 
     def calc_face_pdfs(self,params,config):
@@ -150,7 +154,7 @@ class Methods:
 
     def calc_ghost(self,params,config,known_cell_ind,known_cell_dist,ghost_cell_dist):
         nodes_index = config["faces"]["nodes_index"]
-        face_pdf = jnp.mean(self.get_node_pdfs(params,nodes_index))
+        face_pdf = jnp.mean(self.get_node_pdfs(params,nodes_index),axis=0)
         cell_pdf = self.get_cell_pdf(params,known_cell_ind)
         return extrap_pdf(face_pdf,cell_pdf,ghost_cell_dist,known_cell_dist)
 

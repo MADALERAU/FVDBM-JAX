@@ -30,7 +30,7 @@ class Dynamics():
         return jnp.ones(self.NUM_QUIVERS)
     
     def density(self,pdf: ArrayLike): # returns calculated density
-        return jnp.sum(pdf)
+        return jnp.sum(pdf,keepdims=True)
     
     def velocity(self,pdf:ArrayLike,rho:ArrayLike): # returns calculated velocity
         return jnp.dot(self.KSI.T,pdf)/rho
@@ -61,7 +61,10 @@ class D2Q9(Dynamics):
         self.delta_t = delta_t
     
     def calc_eq(self,rho: ArrayLike,vel:ArrayLike):
-        return self.W*rho*(1+(jnp.dot(self.KSI,vel))/(self.C**2)+(jnp.dot(self.KSI,vel))**2/(2*self.C**4)-(jnp.dot(vel,vel))/(2*self.C**2))
+        return self.W*rho*(1+
+                           (jnp.dot(self.KSI,vel))/(self.C**2)+
+                           (jnp.dot(self.KSI,vel))**2/(2*self.C**4)-
+                           (jnp.dot(vel,vel))/(2*self.C**2))
 
     
 class D2Q13(Dynamics):
