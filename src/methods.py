@@ -55,8 +55,6 @@ class Methods:
         faces_n = config["cells"]["faces_n"]
         fluxes = jax.vmap(self.get_face_flux,in_axes=(None,0,0))(params,faces_ind,faces_n)
         flux = jnp.sum(fluxes)
-        print(flux)
-        print(params["cells"]["pdf"])
         return params["cells"]["pdf"]+self.dynamics.delta_t/self.dynamics.tau*(params["cells"]["pdf_eq"]-params["cells"]["pdf"])-flux
     
     def calc_cell_pdfs(self,params,config):
