@@ -49,7 +49,7 @@ class Environment(MultiElementContainer):
         return cls(*children,**aux_data)
     ### END ###
     
-    @partial(jax.jit,static_argnums=(0))
+    #@partial(jax.jit,static_argnums=(0))
     def step(self,params,config): # one iteration of FVDBM
         params = self.methods.calc_cell_macros(params,config)
         params = self.methods.calc_cell_eqs(params,config)
