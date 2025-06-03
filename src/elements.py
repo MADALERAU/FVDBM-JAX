@@ -185,6 +185,9 @@ class Cell(Element):
     def calc_eq(self):
         self.pdf_eq = self.equilibrium(self.rho,self.vel)
 
+    def calc_eq_init(self):
+        self.pdf = self.equilibrium(self.rho,self.vel)
+
 class Face(Element):
 
     #Init/Jax Methods   

@@ -54,8 +54,9 @@ class Methods:
         faces_ind = config["cells"]["faces_index"]
         faces_n = config["cells"]["faces_n"]
         fluxes = jax.vmap(self.get_face_flux,in_axes=(None,0,0))(params,faces_ind,faces_n)
+        #print(fluxes)
         flux = jnp.sum(fluxes,axis=0)
-        return params["cells"]["pdf"]+self.dynamics.delta_t/self.dynamics.tau*(params["cells"]["pdf_eq"]-params["cells"]["pdf"])-flux
+        return params["cells"]["pdf"]+self.dynamics.delta_t*(1/self.dynamics.tau*(params["cells"]["pdf_eq"]-params["cells"]["pdf"])-flux)
     
     def calc_cell_pdfs(self,params,config):
         params["cells"]["pdf"] = self.vmap_cells(self.calc_cell_pdf,params,config)
@@ -143,7 +144,7 @@ class Methods:
 
         pdf = jnp.where(norm==0,interp_cell,pdf)
 
-        flux = pdf*jnp.matmul(self.dynamics.KSI,config["faces"]["n"])*config["faces"]["L"]
+        flux = pdf*norm*config["faces"]["L"]
         return pdf,flux
 
     def calc_face_pdfs(self,params,config):
