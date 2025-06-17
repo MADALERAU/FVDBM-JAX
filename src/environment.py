@@ -9,35 +9,30 @@ from src.dynamics import D2Q9
 from src.methods import *
 from src.containers import *
 
-class Environment(MultiElementContainer):
+@jax.tree_util.register_pytree_node_class
+class Environment():
     # Static Class Var.
     dynamics: Dynamics
 
-    def __init__(self, cells: Container, faces: Container, nodes: Container,  methods:Methods): # defines environment from list of cells, faces, and nodes
+    def __init__(self, cells: Cells, faces: Faces, nodes: Nodes): # defines environment from list of cells, faces, and nodes
         self.cells = cells
         self.faces = faces
         self.nodes = nodes
-        self.methods = methods
 
     @classmethod
-    def create(cls,cells=[],faces = [],nodes = []):
+    def create(cls,num_cells,num_faces,num_nodes):
         temp  = cls.__new__(cls)
-        temp.cells = ElementContainer("cells",cells)
-        temp.faces = ElementContainer("faces",faces)
-        temp.nodes = NodeContainer("nodes",nodes)
+        temp.cells = Cells(num_cells,cls.dynamics)
+        temp.faces = Faces(num_faces,cls.dynamics)
+        temp.nodes = Nodes(num_nodes,cls.dynamics)
         return temp
     
     def init(self):
-        dynamic = {}
-        static = {}
-        dynamic["cells"],static["cells"] = self.cells.flatten()
-        dynamic["faces"],static["faces"] = self.faces.flatten()
-        dynamic["nodes"],static["nodes"] = self.nodes.flatten()
-        return  dynamic,static
+        self.cells.init()
+        self.faces.init()
+        self.nodes.init()
+        return self
     
-    def setMethods(self,method):
-        self.methods = method(self.dynamics)
-
     ### JAX PyTree Methods ###
     def tree_flatten(self):
         children = (self.cells,self.faces,self.nodes)
@@ -49,11 +44,11 @@ class Environment(MultiElementContainer):
         return cls(*children,**aux_data)
     ### END ###
     
-    @partial(jax.jit,static_argnums=(0))
-    def step(self,params,config): # one iteration of FVDBM
-        params = self.methods.calc_cell_macros(params,config)
-        params = self.methods.calc_cell_eqs(params,config)
-        params = self.methods.calc_node_pdfs(params,config)
-        params = self.methods.calc_face_pdfs(params,config)
-        params = self.methods.calc_cell_pdfs(params,config)
-        return params
+    @jax.jit
+    def step(self): # one iteration of FVDBM
+        self.cells.calc_macros()
+        self.cells.calc_eqs()
+        self.nodes.calc_pdfs()
+        self.faces.calc_fluxes()
+        self.cells.calc_pdfs()
+        return self

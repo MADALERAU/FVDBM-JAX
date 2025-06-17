@@ -1,6 +1,7 @@
 """
 containers...
 """
+from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
@@ -54,6 +55,7 @@ class Cells(Container):
         # Density and Velocity
         self.rho = jnp.zeros((size, 1), dtype=jnp.float32)
         self.vel = jnp.zeros((size, dynamics.DIM), dtype=jnp.float32)
+        self.pdf_eq = jnp.zeros((size, dynamics.NUM_QUIVERS), dtype=jnp.float32)
 
         self.face_indices = CustomArray(size, dtype=jnp.int32, default_value=-1)
         self.face_normals = CustomArray(size, dtype=jnp.bool, default_value=0)
@@ -70,8 +72,8 @@ class Cells(Container):
     def tree_flatten(self):
         children, aux_data = super().tree_flatten()
 
-        children += (self.rho, self.vel)
-        
+        children += (self.rho, self.vel,self.pdf_eq)
+
         aux_data["face_indices"] = self.face_indices
         aux_data["face_normals"] = self.face_normals
         return children, aux_data
@@ -81,23 +83,57 @@ class Cells(Container):
 
         obj.rho = children[1]
         obj.vel = children[2]
+        obj.pdf_eq = children[3]
         obj.face_indices = aux_data["face_indices"]
         obj.face_normals = aux_data["face_normals"]
 
         return obj
     
+    # Cell Methods
     def calc_macros(self):
-        self.rho,self.vel = jax.jit(jax.vmap(self.dynamics.calc_macro))(self.pdf)
+        '''
+        Calculates the macroscopic properties (density and velocity) of the cells.
+        Uses JAX's vmap for vectorized computation.
+        '''
+        self.rho,self.vel = jax.vmap(self.dynamics.calc_macro)(self.pdf)
 
+    def calc_eqs(self):
+        '''
+        Calculates the equilibrium PDFs for the cells.
+        Uses JAX's vmap for vectorized computation.
+        '''
+        self.pdf_eq = jax.vmap(self.dynamics.calc_eq)(self.rho, self.vel)
+
+    def calc_pdfs(self):
+        self.pdf = jax.vmap(self.calc_cell_pdf)(self.pdf,self.pdf_eq,self.face_indices, self.face_normals)
+    
+    def calc_pdf(self,faces:Faces, pdf, pdf_eq, face_indices, face_normals):
+        fluxes = jax.vmap(faces.get_flux)(face_indices)*face_normals
+        flux = jnp.sum(fluxes, axis=0)
+        return pdf + self.dynamics.delta_t * (1 / self.dynamics.tau * (pdf_eq - pdf) - flux)
+
+    def get_rho(self,cell_index):
+        return self.rho[cell_index]
+    
+    def get_vel(self,cell_index):
+        return self.vel[cell_index]
+    
+    def get_pdf(self,cell_index):
+        return self.pdf[cell_index]
+    
+    def get_eq(self,cell_index):
+        return self.pdf_eq[cell_index]
+
+@jax.tree_util.register_pytree_node_class
 class Faces(Container):
     '''
     Class for Faces in the FVDBM solver.
     Inherits from Container and initializes with the dynamics.
+    *** Faces.pdf is treated as flux in the FVDBM solver. ***
     '''
     def __init__(self, size, dynamics: Dynamics):
-        super().__init__(size, dynamics)
-        self.flux = jnp.zeros((size, dynamics.NUM_QUIVERS), dtype=jnp.float32)
-        
+        super().__init__(size, dynamics) # treats PDF as flux
+
         #Static
         self.nodes_index = CustomArray(size, dtype=jnp.int32, default_value=-1)
         self.stencil_cells_index = CustomArray(size, dtype=jnp.int32, default_value=-1)
@@ -113,6 +149,73 @@ class Faces(Container):
         self.stencil_cells_index = jnp.asarray(self.stencil_cells_index)
         self.stencil_dists = jnp.asarray(self.stencil_dists)
 
+    # Jax Flattening Methods
+    def tree_flatten(self):
+        children, aux_data = super().tree_flatten()
+
+        aux_data["nodes_index"] = self.nodes_index
+        aux_data["stencil_cells_index"] = self.stencil_cells_index
+        aux_data["stencil_dists"] = self.stencil_dists
+        aux_data["n"] = self.n
+        aux_data["L"] = self.L
+        return children, aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        obj = super().tree_unflatten({"dynamics":aux_data["dynamics"]}, children[:1])
+
+        obj.nodes_index = aux_data["nodes_index"]
+        obj.stencil_cells_index = aux_data["stencil_cells_index"]
+        obj.stencil_dists = aux_data["stencil_dists"]
+        obj.n = aux_data["n"]
+        obj.L = aux_data["L"]
+
+        return obj
+    
+    def calc_fluxes(self,cells:Cells,nodes:Nodes):
+        self.pdf = jax.vmap(self.calc_flux,in_axes=(None,None,0,0,0,0,0))(
+            cells,
+            nodes,
+            self.stencil_cells_index,
+            self.stencil_dists,
+            self.nodes_index,
+            self.n,
+            self.L
+        )
+    
+    def calc_flux(self,
+                       cells:Cells,
+                       nodes:Nodes,
+                       cells_index,
+                       cell_dists,
+                       nodes_index,
+                       n,
+                       L):
+        left_cell_pdf = jax.lax.select(cells_index[0]==-1,
+                                       self.calc_ghost(cells,nodes,nodes_index,cells_index[1],cell_dists[0],cell_dists[1]),
+                                       cells.get_pdf(cells_index[0]))
+        right_cell_pdf = jax.lax.select(cells_index[1]==-1,
+                                        self.calc_ghost(cells,nodes,nodes_index,cells_index[0],cell_dists[1],cell_dists[0]),
+                                        cells.get_pdf(cells_index[1]))
+        pdf = jnp.zeros_like(left_cell_pdf)
+        norm = jnp.dot(self.dynamics.KSI, n)
+        pdf = jnp.where(norm >= 0, left_cell_pdf, right_cell_pdf)
+
+        flux = pdf*norm*L
+
+        return flux
+
+
+    def calc_ghost(self,cells:Cells,nodes: Nodes,nodes_index,known_cell_ind,ghost_cell_dist,known_cell_dist):
+        face_pdf = jnp.mean(jax.vmap(nodes.get_pdf)(nodes_index),axis=0)
+        cell_pdf = cells.get_pdf(known_cell_ind)
+        return extrap_pdf(face_pdf,cell_pdf,ghost_cell_dist,known_cell_dist)
+
+    #getters
+    def get_flux(self,face_index):
+        return self.pdf[face_index]
+
+@jax.tree_util.register_pytree_node_class
 class Nodes(Container):
     '''
     Class for Nodes in the FVDBM solver.
@@ -135,4 +238,86 @@ class Nodes(Container):
         self.cells_index = jnp.asarray(self.cells_index)
         self.cell_dists = jnp.asarray(self.cell_dists)
 
+    # Jax Flattening Methods
+    def tree_flatten(self):
+        children, aux_data = super().tree_flatten()
+
+        children += (self.rho, self.vel)
+
+        aux_data["type"] = self.type
+        aux_data["cells_index"] = self.cells_index
+        aux_data["cell_dists"] = self.cell_dists
+        return children, aux_data
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        obj = super().tree_unflatten({"dynamics":aux_data["dynamics"]}, children[:1])
+
+        obj.rho = children[1]
+        obj.vel = children[2]
+        obj.type = aux_data["type"]
+        obj.cells_index = aux_data["cells_index"]
+        obj.cell_dists = aux_data["cell_dists"]
+
+        return obj
     
+    def calc_pdfs(self,cells:Cells):
+        self.calc_vel_pdfs(self, cells)
+
+    def calc_vel_pdfs(self,cells:Cells):
+        indices = jnp.where(self.type == 1)[0] # Assuming type 1 is for velocity nodes
+        self.pdf.at[indices].set(jax.vmap(
+                                    self.calc_vel_pdf,in_axes=(None,0)
+                                    )
+                                (cells, indices)
+                                )
+
+    def calc_vel_pdf(self,cells:Cells,index):
+        rho = self.calc_density(index, cells)
+        vel = self.vel[index]
+        pdf = self.dynamics.calc_eq(rho, vel)+self.calc_neq(cells,index)
+        return pdf,rho
+
+    def calc_neq(self, cells: Cells, index):
+        neqs = self.get_cell_neqs(self.cells_index[index], cells)
+        return extrapolate(neqs, self.cell_dists[index])
+
+        
+    def calc_density(self,index,cells:Cells):
+        '''
+        Calculates the density of the node given its index.
+        '''
+        return extrapolate(self.get_cell_rhos(self.cells_index[index], cells),self.cell_dists[index])
+    
+    def get_cell_neqs(self, cell_indices, cells: Cells):
+        '''
+        Returns the non-equilibrium PDFs of the cells given their indices.
+        Uses JAX's vmap for vectorized computation.
+        '''
+        return jax.vmap(self.get_cell_neq, in_axes=(0, None))(cell_indices, cells)
+
+    def get_cell_neq(self,cell_index, cells: Cells):
+        '''
+        Returns the non-equilibrium PDFs of the cells given their indices.
+        Uses JAX's vmap for vectorized computation.
+        '''
+        return jax.lax.select(cell_index==-1,
+                              jnp.zeros((cells.pdf_eq.shape[-1])),
+                              cells.get_pdf(cell_index)-cells.get_eq(cell_index))
+
+    def get_cell_rhos(self,cell_indices, cells: Cells):
+        '''
+        Returns the densities of the cells given their indices.
+        Uses JAX's vmap for vectorized computation.
+        '''
+        return jax.vmap(cells.get_rho)(cell_indices)
+    
+    def get_cell_vels(self,cell_index,cells: Cells):
+        '''
+        Returns the velocities of the cells given their indices.
+        Uses JAX's vmap for vectorized computation.
+        '''
+        return jax.vmap(cells.get_vel)(cell_index)
+
+    #getters
+    def get_pdf(self,node_index):
+        return self.pdf[node_index]
