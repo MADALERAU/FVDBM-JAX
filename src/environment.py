@@ -4,9 +4,7 @@ environment
 import jax
 import sys
 sys.path.append(".")
-from src.elements import *
 from src.dynamics import D2Q9
-from src.methods import *
 from src.containers import *
 
 @jax.tree_util.register_pytree_node_class
@@ -31,7 +29,6 @@ class Environment():
         self.cells.init()
         self.faces.init()
         self.nodes.init()
-        return self
     
     ### JAX PyTree Methods ###
     def tree_flatten(self):
@@ -48,7 +45,10 @@ class Environment():
     def step(self): # one iteration of FVDBM
         self.cells.calc_macros()
         self.cells.calc_eqs()
-        self.nodes.calc_pdfs()
-        self.faces.calc_fluxes()
-        self.cells.calc_pdfs()
+        self.nodes.calc_pdfs(self.cells)
+        self.faces.calc_fluxes(self.cells,self.nodes)
+        self.cells.calc_pdfs(self.faces)
         return self
+    
+    def __repr__(self):
+        return f"Environment(cells={self.cells}, faces={self.faces}, nodes={self.nodes})"

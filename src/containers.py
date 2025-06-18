@@ -12,7 +12,6 @@ import sys
 sys.path.append(".")
 from src.dynamics import Dynamics
 from utils.utils import *
-from src.elements import *
 import jax.tree_util
 import numpy as np
 
@@ -58,8 +57,8 @@ class Cells(Container):
         self.pdf_eq = jnp.zeros((size, dynamics.NUM_QUIVERS), dtype=jnp.float32)
 
         self.face_indices = CustomArray(size, dtype=jnp.int32, default_value=-1)
-        self.face_normals = CustomArray(size, dtype=jnp.bool, default_value=0)
-        '''Face Normals (0 = negative, 1 = positive)'''
+
+        self.face_normals = CustomArray(size, dtype=jnp.int32, default_value=-1)
 
     def init(self):
         '''
@@ -104,11 +103,11 @@ class Cells(Container):
         '''
         self.pdf_eq = jax.vmap(self.dynamics.calc_eq)(self.rho, self.vel)
 
-    def calc_pdfs(self):
-        self.pdf = jax.vmap(self.calc_cell_pdf)(self.pdf,self.pdf_eq,self.face_indices, self.face_normals)
+    def calc_pdfs(self,faces:Faces):
+        self.pdf = jax.vmap(self.calc_pdf,in_axes=(None,0,0,0,0))(faces,self.pdf,self.pdf_eq,self.face_indices, self.face_normals)
     
     def calc_pdf(self,faces:Faces, pdf, pdf_eq, face_indices, face_normals):
-        fluxes = jax.vmap(faces.get_flux)(face_indices)*face_normals
+        fluxes = jax.vmap(faces.get_flux)(face_indices)*face_normals[...,jnp.newaxis]
         flux = jnp.sum(fluxes, axis=0)
         return pdf + self.dynamics.delta_t * (1 / self.dynamics.tau * (pdf_eq - pdf) - flux)
 
@@ -197,6 +196,7 @@ class Faces(Container):
         right_cell_pdf = jax.lax.select(cells_index[1]==-1,
                                         self.calc_ghost(cells,nodes,nodes_index,cells_index[0],cell_dists[1],cell_dists[0]),
                                         cells.get_pdf(cells_index[1]))
+
         pdf = jnp.zeros_like(left_cell_pdf)
         norm = jnp.dot(self.dynamics.KSI, n)
         pdf = jnp.where(norm >= 0, left_cell_pdf, right_cell_pdf)
@@ -237,7 +237,8 @@ class Nodes(Container):
         '''
         self.cells_index = jnp.asarray(self.cells_index)
         self.cell_dists = jnp.asarray(self.cell_dists)
-
+        #self.type = jax.nn.one_hot(self.type,jnp.unique(self.type).shape[0], dtype=jnp.int32)
+        
     # Jax Flattening Methods
     def tree_flatten(self):
         children, aux_data = super().tree_flatten()
@@ -261,28 +262,26 @@ class Nodes(Container):
         return obj
     
     def calc_pdfs(self,cells:Cells):
-        self.calc_vel_pdfs(self, cells)
+        self.calc_vel_pdfs(cells)
 
     def calc_vel_pdfs(self,cells:Cells):
-        indices = jnp.where(self.type == 1)[0] # Assuming type 1 is for velocity nodes
-        self.pdf.at[indices].set(jax.vmap(
-                                    self.calc_vel_pdf,in_axes=(None,0)
-                                    )
-                                (cells, indices)
-                                )
+        indices = jnp.arange(self.pdf.shape[0]) # Assuming type 1 is for velocity nodes
+        self.rho = jnp.where(self.type==1,jax.vmap(self.calc_density,in_axes=(None,0))(cells, indices), self.rho)
+
+        self.pdf = jnp.where(self.type==1,jax.vmap(self.calc_vel_pdf,in_axes=(None,0))(cells, indices), self.pdf)
 
     def calc_vel_pdf(self,cells:Cells,index):
-        rho = self.calc_density(index, cells)
+        rho = self.rho[index]
         vel = self.vel[index]
         pdf = self.dynamics.calc_eq(rho, vel)+self.calc_neq(cells,index)
-        return pdf,rho
+        return pdf
 
     def calc_neq(self, cells: Cells, index):
         neqs = self.get_cell_neqs(self.cells_index[index], cells)
         return extrapolate(neqs, self.cell_dists[index])
 
         
-    def calc_density(self,index,cells:Cells):
+    def calc_density(self,cells:Cells,index):
         '''
         Calculates the density of the node given its index.
         '''

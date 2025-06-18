@@ -156,7 +156,6 @@ def extrap_pdf(pdf1,pdf2,extrap_dist,pdf2_dist):
 def interp_pdf(pdf,dist):
     return weighted_avg(pdf,1./dist)
 
-
 class CustomArray():
     '''
     Custom Array class for use in Containers.
@@ -166,9 +165,11 @@ class CustomArray():
         Initializes the CustomArray with a given size.
         '''
         self.data = default_value*jnp.ones((size,1), dtype=dtype)
+        self.default_value = default_value
     
     def add_item(self,index,item):
-        ind_avail = jnp.where(self.data[index] == -1)[0]
+        ind_avail = jnp.where(self.data[index] == self.default_value)[0]
+
         if ind_avail.size != 0:
             self.data = self.data.at[index,ind_avail[0]].set(item)
         else:
