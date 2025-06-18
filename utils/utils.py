@@ -3,6 +3,8 @@ Utility Functions for Handling Pytrees, Computations,Etc
 """
 import jax.numpy as jnp
 import jax
+from jax.typing import ArrayLike
+import numpy as np
 
 def pad_stack(args):
     """
@@ -153,3 +155,59 @@ def extrap_pdf(pdf1,pdf2,extrap_dist,pdf2_dist):
 
 def interp_pdf(pdf,dist):
     return weighted_avg(pdf,1./dist)
+
+class CustomArray():
+    '''
+    Custom Array class for use in Containers.
+    '''
+    def __init__(self,size,dtype=jnp.asarray(1.).dtype, default_value=-1):
+        '''
+        Initializes the CustomArray with a given size.
+        '''
+        self.data = default_value*jnp.ones((size,1), dtype=dtype)
+        self.default_value = default_value
+    
+    def add_item(self,index,item):
+        ind_avail = jnp.where(self.data[index] == self.default_value)[0]
+
+        if ind_avail.size != 0:
+            self.data = self.data.at[index,ind_avail[0]].set(item)
+        else:
+            self.data = jnp.concatenate((self.data, (-jnp.ones_like(self.data[...,0:1])).at[index].set(item)), axis=-1)
+
+    def __array__(self):
+        return np.asarray(self.data)
+    
+    def __jax_array__(self):
+        return jnp.asarray(self.data)
+    
+    def __getitem__(self,idx):
+        '''
+        Allows indexing into the CustomArray.
+        '''
+        return self.data[idx]
+
+    def add_items(self, index, items: ArrayLike):
+        '''
+        Adds multiple items to the CustomArray at the specified index.
+        '''
+        for item in items:
+            self.add_item(index, item)
+
+    def shape(self):
+        '''
+        Returns the shape of the CustomArray.
+        '''
+        return self.data.shape
+    
+    def __repr__(self):
+        '''
+        Returns a string representation of the CustomArray.
+        '''
+        return f"CustomArray(size={self.data.shape[0]}, data={self.data})"
+    
+    def dtype(self):
+        '''
+        Returns the data type of the CustomArray.
+        '''
+        return self.data.dtype
