@@ -19,6 +19,7 @@ class Environment():
 
     @classmethod
     def create(cls,num_cells,num_faces,num_nodes):
+        ''' Factory method to create an Environment instance with specified number of cells, faces, and nodes. '''
         temp  = cls.__new__(cls)
         temp.cells = Cells(num_cells,cls.dynamics)
         temp.faces = Faces(num_faces,cls.dynamics)
@@ -26,6 +27,7 @@ class Environment():
         return temp
     
     def init(self):
+        ''' Initialize the environment by initializing its cells, faces, and nodes. '''
         self.cells.init()
         self.faces.init()
         self.nodes.init()
@@ -42,12 +44,15 @@ class Environment():
     ### END ###
     
     @jax.jit
-    def step(self): # one iteration of FVDBM
-        self.cells.calc_macros()
-        self.cells.calc_eqs()
-        self.nodes.calc_pdfs(self.cells)
-        self.faces.calc_fluxes(self.cells,self.nodes)
-        self.cells.calc_pdfs(self.faces)
+    def step(self):
+        '''
+        one iteration of Standard FVDBM
+        '''
+        self.cells.calc_macros() # calculate macroscopic variables from PDFs
+        self.cells.calc_eqs()   # calculate equilibrium PDFs
+        self.nodes.calc_pdfs(self.cells)    # calculate PDFs at nodes from cells
+        self.faces.calc_fluxes(self.cells,self.nodes) # calculate fluxes at faces from cells and nodes
+        self.cells.calc_pdfs(self.faces)    # calculate PDFs at cells from faces
         return self
     
     def __repr__(self):

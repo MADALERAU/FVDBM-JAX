@@ -104,13 +104,22 @@ class Cells(Container):
         self.pdf_eq = jax.vmap(self.dynamics.calc_eq)(self.rho, self.vel)
 
     def calc_pdfs(self,faces:Faces):
+        '''
+        vmapped wrapper for the calc_pdf method.
+        Calculates the PDFs for all cells based on the equilibrium PDFs and fluxes from the faces.
+        Uses JAX's vmap for vectorized computation.
+        '''
         self.pdf = jax.vmap(self.calc_pdf,in_axes=(None,0,0,0,0))(faces,self.pdf,self.pdf_eq,self.face_indices, self.face_normals)
     
     def calc_pdf(self,faces:Faces, pdf, pdf_eq, face_indices, face_normals):
+        '''
+        Calculates the PDF for a cell based on the equilibrium PDF and fluxes from the faces.
+        '''
         fluxes = jax.vmap(faces.get_flux)(face_indices)*face_normals[...,jnp.newaxis]
         flux = jnp.sum(fluxes, axis=0)
         return pdf + self.dynamics.delta_t * (1 / self.dynamics.tau * (pdf_eq - pdf) - flux)
 
+    #getters
     def get_rho(self,cell_index):
         return self.rho[cell_index]
     
@@ -172,6 +181,11 @@ class Faces(Container):
         return obj
     
     def calc_fluxes(self,cells:Cells,nodes:Nodes):
+        '''
+        vmapped wrapper for the calc_flux method.
+        Calculates the fluxes for all faces based on the cells and nodes.
+        Uses JAX's vmap for vectorized computation.
+        '''
         self.pdf = jax.vmap(self.calc_flux,in_axes=(None,None,0,0,0,0,0))(
             cells,
             nodes,
@@ -190,6 +204,9 @@ class Faces(Container):
                        nodes_index,
                        n,
                        L):
+        '''
+        Calculates the flux for a face based on the cells and nodes. Uses a first order extrapolation method
+        '''
         left_cell_pdf = jax.lax.select(cells_index[0]==-1,
                                        self.calc_ghost(cells,nodes,nodes_index,cells_index[1],cell_dists[0],cell_dists[1]),
                                        cells.get_pdf(cells_index[0]))
@@ -205,8 +222,11 @@ class Faces(Container):
 
         return flux
 
-
     def calc_ghost(self,cells:Cells,nodes: Nodes,nodes_index,known_cell_ind,ghost_cell_dist,known_cell_dist):
+        '''
+        Calculates the ghost cell PDF based on the known cell PDF and the distance to the ghost cell.
+        Uses a first order extrapolation method.
+        '''
         face_pdf = jnp.mean(jax.vmap(nodes.get_pdf)(nodes_index),axis=0)
         cell_pdf = cells.get_pdf(known_cell_ind)
         return extrap_pdf(face_pdf,cell_pdf,ghost_cell_dist,known_cell_dist)

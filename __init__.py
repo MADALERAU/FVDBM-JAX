@@ -34,6 +34,6 @@ Description
 ## etc
 ### Contributers
 The list of contributers for the FVDBMSolver is shown below:
-- Sungje Park ([email](mailto:parks48@my.erau.edu))
-- Leitao Chen ([email](mailto:leitao.chen@my.erau.edu))
+- Sungje Park ([email](mailto:sungjepa@usc.edu)
+- Leitao Chen ([email](mailto:leitao.chen@erau.edu))
 """
