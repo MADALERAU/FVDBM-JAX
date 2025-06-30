@@ -26,6 +26,15 @@ class Environment():
         temp.nodes = Nodes(num_nodes,cls.dynamics)
         return temp
     
+    @classmethod
+    def define(cls, cells:Cells, faces:Faces, nodes:Nodes):
+        ''' Factory method to create an Environment instance with specified cells, faces, and nodes. '''
+        temp = cls.__new__(cls)
+        temp.cells = cells
+        temp.faces = faces
+        temp.nodes = nodes
+        return temp
+    
     def init(self):
         ''' Initialize the environment by initializing its cells, faces, and nodes. '''
         self.cells.init()
