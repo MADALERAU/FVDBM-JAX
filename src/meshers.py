@@ -48,7 +48,7 @@ class Mesher():
 
         nodes.cells_index = self.point_cell_indices
         nodes.cell_dists = self.point_cell_center_distances
-        nodes.type = self.point_markers
+        nodes.type = self.point_markers[...,jnp.newaxis]
 
         return cells,faces,nodes
 
