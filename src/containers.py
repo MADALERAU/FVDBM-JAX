@@ -209,6 +209,7 @@ class Faces(Container):
                        L):
         '''
         Calculates the flux for a face based on the cells and nodes. Uses a first order extrapolation method
+        left is upwind, right is downwind to the normal
         '''
         left_cell_pdf = jax.lax.select(cells_index[0]==-1,
                                        self.calc_ghost(cells,nodes,nodes_index,cells_index[1],cell_dists[0],cell_dists[1]),

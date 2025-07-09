@@ -156,6 +156,23 @@ def extrap_pdf(pdf1,pdf2,extrap_dist,pdf2_dist):
 def interp_pdf(pdf,dist):
     return weighted_avg(pdf,1./dist)
 
+def calc_dist(p1, p2):
+    return np.linalg.norm(p2 - p1)
+
+def calc_normal(p1, p2):
+    '''
+    calculates the unit normal vector to the line segment defined by points p1 and p2.
+    The vector is oriented such that it points to the left when moving from p1 to p2.
+    '''
+    # Calculate the tangent vector
+    tangent = p2 - p1
+    # Compute the normal by rotating tangent by 90 degrees (counter-clockwise)
+    normal = np.array([-tangent[1], tangent[0]])
+    # Normalize the normal vector
+    unit_normal = normal / np.linalg.norm(normal)
+    return unit_normal
+
+
 class CustomArray():
     '''
     Custom Array class for use in Containers.
