@@ -1,23 +1,55 @@
 '''
 Mesher module for generating mesh data for solver from geometry.
+
+This module provides the Mesher class for constructing, analyzing, and verifying 2D triangular meshes for finite volume solvers.
+It includes routines for mesh import, geometric property calculation, face/cell/point connectivity, mesh quality verification,
+and stencil geometry analysis. All docstrings are compatible with pdoc documentation generation.
 '''
 import jax
 import jax.numpy as jnp
 import numpy as np
+import time
 from utils.utils import *
 from src.containers import *
 from src.dynamics import *
 
 class Mesher():
+    '''
+    Mesher constructs and analyzes 2D triangular meshes for finite volume solvers.
 
+    Attributes
+    ----------
+    points : ndarray
+        Array of mesh point coordinates.
+    cells : ndarray
+        Array of triangle vertex indices.
+    neighbors : ndarray
+        Array of neighboring cell indices for each cell.
+    faces : ndarray
+        Array of face vertex indices.
+    point_markers : ndarray
+        Point markers for boundary conditions.
+    '''
     def __init__(self):
+        '''
+        Initialize an empty Mesher object.
+        '''
         self.points = None
         self.cells = None # index of three points
         self.neighbors = None # index of three cells
         self.faces = None # index of two points
         self.point_markers = None # Point markers for boundary conditions
 
+    # --- Mesh import and orientation ---
     def import_meshpy(self, mesh):
+        '''
+        Import mesh data from a meshpy.triangle mesh object.
+
+        Parameters
+        ----------
+        mesh : meshpy.triangle.MeshInfo
+            Mesh object to import.
+        '''
         self.points = np.array(mesh.points,dtype=np.float64)
         self.cells = np.array(mesh.elements,dtype=np.int32)
         self.faces = np.array(mesh.faces,dtype=np.int32)
@@ -47,38 +79,18 @@ class Mesher():
         For each boundary face (face with only one adjacent cell),
         check if the normal points outward from the cell. If not, flip the face node order.
         '''
-        # First, build a mapping from face to adjacent cells
-        face_keys = np.sort(self.faces, axis=1)
-        def cell_faces(cell):
-            return np.stack([
-                np.sort(np.array([cell[0], cell[1]])),
-                np.sort(np.array([cell[1], cell[2]])),
-                np.sort(np.array([cell[2], cell[0]]))
-            ])
-        cell_face_keys = np.array([cell_faces(cell) for cell in self.cells])
-        face_cell_count = np.zeros(len(self.faces), dtype=int)
-        for cell_face_keys_ in cell_face_keys:
-            for face_key in cell_face_keys_:
-                matches = np.all(face_keys == face_key, axis=1)
-                face_idx = np.argmax(matches)
-                face_cell_count[face_idx] += 1
-        # For each boundary face, check normal direction
-        for i, count in enumerate(face_cell_count):
-            if count == 1:
-                # Find the cell that owns this face
-                face = self.faces[i]
-                # Find the cell index
-                cell_idx = -1
-                for idx, cell in enumerate(self.cells):
-                    cell_faces_ = cell_faces(cell)
-                    for f in cell_faces_:
-                        if np.all(np.sort(face) == f):
-                            cell_idx = idx
-                            break
-                    if cell_idx != -1:
-                        break
-                if cell_idx == -1:
-                    continue  # Should not happen
+        # Build a mapping from sorted face (tuple) to owning cell index
+        face_to_cell = {}
+        for cell_idx, cell in enumerate(self.cells):
+            for i in range(3):
+                face_tuple = tuple(sorted((cell[i], cell[(i+1)%3])))
+                face_to_cell.setdefault(face_tuple, []).append(cell_idx)
+        # For each face, check if it's a boundary face (only one adjacent cell)
+        for i, face in enumerate(self.faces):
+            face_tuple = tuple(sorted(face))
+            cell_indices = face_to_cell.get(face_tuple, [])
+            if len(cell_indices) == 1:
+                cell_idx = cell_indices[0]
                 # Compute normal
                 p0, p1 = self.points[face[0]], self.points[face[1]]
                 normal = calc_normal(p0, p1)
@@ -93,102 +105,11 @@ class Mesher():
                     self.faces[i] = [face[1], face[0]]
         # After this, all boundary face normals will point outward
 
-    def calc_face_centers(self):
-        '''Calculate the center (midpoint) of each face.'''
-        self.face_centers = np.array([
-            (self.points[face[0]] + self.points[face[1]]) / 2.0
-            for face in self.faces
-        ])
-
-    def calc_mesh_properties(self):
-        print("Calculating cell centers...")
-        self.calc_cell_centers()
-        print("Cell centers calculated.")
-
-        # Ensure boundary face normals are outward after cell centers are available
-        self.enforce_boundary_face_normals_outward()
-
-        print("Calculating face centers...")
-        self.calc_face_centers()
-        print("Face centers calculated.")
-
-        print("Calculating face normals...")
-        self.calc_face_normals()
-        print("Face normals calculated.")
-
-        print("Calculating face lengths...")
-        self.calc_face_lengths()
-        print("Face lengths calculated.")
-
-        print("Calculating cell face indices and normals...")
-        self.calc_cell_face_indices_and_normals()
-        print("Cell face indices and normals calculated.")
-
-        print("Calculating cell face normal signs...")
-        self.calc_cell_face_normal_signs()
-        print("Cell face normal signs calculated.")
-
-        print("Calculating face cell indices...")
-        self.calc_face_cell_indices()
-        print("Face cell indices calculated.")
-
-        print("Calculating face ghost distances...")
-        self.calc_face_ghost_distances()
-        print("Face ghost distances calculated.")
-
-        print("Calculating point cell indices and distances...")
-        self.calc_point_cell_indices_and_distances()
-        print("Point cell indices and distances calculated.")
-
-    def to_env(self, dynamics):
-        cells = Cells(self.cells.shape[0], dynamics)
-        faces = Faces(self.faces.shape[0], dynamics)
-        nodes = Nodes(self.points.shape[0], dynamics)
-        # Convert all arrays to jax arrays before assignment
-        cells.face_indices = jnp.array(self.cell_face_indices,dtype=jnp.int32)
-        cells.face_normals = jnp.array(self.cell_face_normal_signs,dtype=jnp.int32)
-
-        faces.n = jnp.array(self.face_normals,dtype=jnp.float64)
-        faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * 50
-        faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
-        faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
-        faces.stencil_dists = jnp.array(self.face_cell_center_distances,dtype=jnp.float64)*50
-
-        nodes.cells_index = jnp.array(self.point_cell_indices,dtype=jnp.int32)
-        nodes.cell_dists = jnp.array(self.point_cell_center_distances,dtype=jnp.float64)
-        nodes.cell_dists = nodes.cell_dists.at[jnp.where(nodes.cell_dists > 0)].set(nodes.cell_dists[jnp.where(nodes.cell_dists > 0)] * 50)
-        nodes.type = jnp.zeros_like(self.point_markers[..., np.newaxis], dtype=jnp.int32)
-
-        # The following lines assume self.points is a numpy array, so convert to jax for indexing
-        points_jax = jnp.array(self.points)
-        nodes.type = nodes.type.at[points_jax[:, 1] == 2].set(1)
-        nodes.type = nodes.type.at[points_jax[:, 1] == 0].set(1)
-        nodes.type = nodes.type.at[points_jax[:, 0] == 2].set(1)
-        nodes.type = nodes.type.at[points_jax[:, 0] == 0].set(1)
-
-        nodes.vel = nodes.vel.at[points_jax[:,1] == 2].set(jnp.array([.1, 0]))
-        nodes.vel = nodes.vel.at[points_jax[:,0] == 2].set(jnp.array([0, 0]))
-        nodes.vel = nodes.vel.at[points_jax[:,0] == 0].set(jnp.array([0, 0]))
-
-
-        return cells, faces, nodes
-
-    # Face functions
-    def calc_face_normals(self):
-        ''' Calculate the unit normal vector for each face defined by two points.'''
-        def normal(face):
-            return calc_normal(self.points[face[0]], self.points[face[1]])
-        self.face_normals = np.array([normal(face) for face in self.faces])
-
-    def calc_face_lengths(self):
-        ''' Calculate the length of each face defined by two points.'''
-        def length(face):
-            return calc_dist(self.points[face[0]], self.points[face[1]])
-        self.face_lengths = np.array([length(face) for face in self.faces])
-
-    # Cell Functions
+    # --- Cell geometric properties ---
     def calc_cell_centers(self):
-        ''' Calculate the centroid of each triangle cell'''
+        '''
+        Calculate the centroid of each triangle cell.
+        '''
         def centroid(cell):
             p1, p2, p3 = self.points[cell[0]], self.points[cell[1]], self.points[cell[2]]
             return (p1 + p2 + p3) / 3.0
@@ -198,22 +119,19 @@ class Mesher():
         '''
         For each cell, find the indices of its three faces and the outward normal of each face.
         Assumes all cells are CCW ordered (enforced by enforce_ccw).
+        Optimized for speed using a face-key-to-index dictionary.
         '''
-        face_keys = np.sort(self.faces, axis=1)
+        # Build a mapping from sorted face (tuple) to face index for O(1) lookup
+        face_key_to_index = {tuple(sorted(face)): i for i, face in enumerate(self.faces)}
         def cell_faces(cell):
-            return np.stack([
-                np.sort(np.array([cell[0], cell[1]])),
-                np.sort(np.array([cell[1], cell[2]])),
-                np.sort(np.array([cell[2], cell[0]]))
-            ])
-        cell_face_keys = np.array([cell_faces(cell) for cell in self.cells])  # (num_cells, 3, 2)
-
-        def find_face_indices(cell_face_keys):
-            def find_idx(face_key):
-                matches = np.all(face_keys == face_key, axis=1)
-                return np.argmax(matches)
-            return np.array([find_idx(face_key) for face_key in cell_face_keys])
-        self.cell_face_indices = np.array([find_face_indices(keys) for keys in cell_face_keys])
+            return [tuple(sorted([cell[0], cell[1]])),
+                    tuple(sorted([cell[1], cell[2]])),
+                    tuple(sorted([cell[2], cell[0]]))]
+        # For each cell, get the indices of its three faces
+        self.cell_face_indices = np.array([
+            [face_key_to_index[fk] for fk in cell_faces(cell)]
+            for cell in self.cells
+        ], dtype=int)
 
         def cell_normals(cell, cell_center):
             faces = [
@@ -246,32 +164,56 @@ class Mesher():
             return np.sign(dots)
         self.cell_face_normal_signs = np.array([cell_signs(indices, normals) for indices, normals in zip(self.cell_face_indices, self.cell_face_normals)],dtype=np.int32)
 
+    # --- Face geometric properties ---
+    def calc_face_centers(self):
+        '''
+        Calculate the center (midpoint) of each face.
+        '''
+        self.face_centers = np.array([
+            (self.points[face[0]] + self.points[face[1]]) / 2.0
+            for face in self.faces
+        ])
+
+    def calc_face_normals(self):
+        '''
+        Calculate the unit normal vector for each face defined by two points.
+        '''
+        def normal(face):
+            return calc_normal(self.points[face[0]], self.points[face[1]])
+        self.face_normals = np.array([normal(face) for face in self.faces])
+
+    def calc_face_lengths(self):
+        '''
+        Calculate the length of each face defined by two points.
+        '''
+        def length(face):
+            return calc_dist(self.points[face[0]], self.points[face[1]])
+        self.face_lengths = np.array([length(face) for face in self.faces])
+
     def calc_face_cell_indices(self):
         '''
         For each face, find the two cells that share it, ordered so that the first cell
         is the upwind cell with respect to the face normal.
         Assumes all cells are CCW ordered and face normals are outward.
+        Optimized for speed using a face-key-to-cell mapping.
         '''
         num_faces = self.faces.shape[0]
-        face_keys = np.sort(self.faces, axis=1)
-        def cell_faces(cell):
-            return np.stack([
-                np.sort(np.array([cell[0], cell[1]])),
-                np.sort(np.array([cell[1], cell[2]])),
-                np.sort(np.array([cell[2], cell[0]]))
-            ])
-        cell_face_keys = np.array([cell_faces(cell) for cell in self.cells])  # (num_cells, 3, 2)
-
+        # Build a mapping from face key (tuple of sorted indices) to list of cell indices
+        face_key_to_cells = {}
+        for cell_idx, cell in enumerate(self.cells):
+            for i in range(3):
+                face_key = tuple(sorted([cell[i], cell[(i+1)%3]]))
+                face_key_to_cells.setdefault(face_key, []).append(cell_idx)
+        # For each face, get the two cells that share it
         face_cell_array = -np.ones((num_faces, 2), dtype=int)
-        for cell_idx, cell_face_keys_ in enumerate(cell_face_keys):
-            for face_key in cell_face_keys_:
-                matches = np.all(face_keys == face_key, axis=1)
-                face_idx = np.argmax(matches)
-                if face_cell_array[face_idx, 0] == -1:
-                    face_cell_array[face_idx, 0] = cell_idx
-                elif face_cell_array[face_idx, 1] == -1:
-                    face_cell_array[face_idx, 1] = cell_idx
-
+        for i, face in enumerate(self.faces):
+            face_key = tuple(sorted(face))
+            cells = face_key_to_cells.get(face_key, [])
+            if len(cells) > 0:
+                face_cell_array[i, 0] = cells[0]
+            if len(cells) > 1:
+                face_cell_array[i, 1] = cells[1]
+        # Order cells and distances as before
         def order_cells_and_distances(face, face_normal, cell_indices):
             midpoint = (self.points[face[0]] + self.points[face[1]]) / 2.0
             c0, c1 = cell_indices
@@ -300,7 +242,6 @@ class Mesher():
                     idxs = np.array([c1, c0])
                     dists = np.array([d1, d0])
                 return idxs, dists
-
         results = [order_cells_and_distances(face, normal, cell_indices)
                    for face, normal, cell_indices in zip(self.faces, self.face_normals, face_cell_array)]
         self.face_cell_indices = np.array([r[0] for r in results])
@@ -319,7 +260,7 @@ class Mesher():
         dists[mask1, 1] = dists[mask1, 0]
         self.face_cell_center_distances = dists
 
-    # Node functions
+    # --- Node/cell-to-point connectivity ---
     def calc_point_cell_indices_and_distances(self):
         '''
         For each point, find all cells which touch it and the distance from the point to the cell center.
@@ -352,13 +293,140 @@ class Mesher():
         self.point_cell_indices = point_cell_indices
         self.point_cell_center_distances = point_cell_distances_arr
 
+    # --- Mesh property calculation and conversion ---
+    def calc_mesh_properties(self):
+        '''
+        Calculate all geometric properties and connectivity for the mesh, including cell centers, face normals,
+        face lengths, cell-face connectivity, and stencil geometry. Times and reports each step.
+        '''
+        print("Calculating cell centers...")
+        t0 = time.time()
+        self.calc_cell_centers()
+        print(f"Cell centers calculated. (Elapsed: {time.time()-t0:.3f}s)")
+
+        # Ensure boundary face normals are outward after cell centers are available
+        print("Enforcing boundary face normals outward...")
+        t0 = time.time()
+        self.enforce_boundary_face_normals_outward()
+        print(f"Boundary face normals enforced. (Elapsed: {time.time()-t0:.3f}s)")
+
+        print("Calculating face centers...")
+        t0 = time.time()
+        self.calc_face_centers()
+        print(f"Face centers calculated. (Elapsed: {time.time()-t0:.3f}s)")
+
+        print("Calculating face normals...")
+        t0 = time.time()
+        self.calc_face_normals()
+        print(f"Face normals calculated. (Elapsed: {time.time()-t0:.3f}s)")
+
+        print("Calculating face lengths...")
+        t0 = time.time()
+        self.calc_face_lengths()
+        print(f"Face lengths calculated. (Elapsed: {time.time()-t0:.3f}s)")
+
+        print("Calculating cell face indices and normals...")
+        t0 = time.time()
+        self.calc_cell_face_indices_and_normals()
+        print(f"Cell face indices and normals calculated. (Elapsed: {time.time()-t0:.3f}s)")
+
+        print("Calculating cell face normal signs...")
+        t0 = time.time()
+        self.calc_cell_face_normal_signs()
+        print(f"Cell face normal signs calculated. (Elapsed: {time.time()-t0:.3f}s)")
+
+        print("Calculating face cell indices...")
+        t0 = time.time()
+        self.calc_face_cell_indices()
+        print(f"Face cell indices calculated. (Elapsed: {time.time()-t0:.3f}s)")
+
+        print("Calculating face ghost distances...")
+        t0 = time.time()
+        self.calc_face_ghost_distances()
+        print(f"Face ghost distances calculated. (Elapsed: {time.time()-t0:.3f}s)")
+
+        print("Calculating point cell indices and distances...")
+        t0 = time.time()
+        self.calc_point_cell_indices_and_distances()
+        print(f"Point cell indices and distances calculated. (Elapsed: {time.time()-t0:.3f}s)")
+
+        print("Calculating stencil norms (cell-to-cell/cell-to-face)...")
+        t0 = time.time()
+        self.calc_stencil_norms()
+        print(f"Stencil norms calculated. (Elapsed: {time.time()-t0:.3f}s)")
+
+        print("Calculating face-stencil angles (radians)...")
+        t0 = time.time()
+        self.calc_face_stencil_angles()
+        print(f"Face-stencil angles calculated. (Elapsed: {time.time()-t0:.3f}s)")
+
+    def to_env(self, dynamics, flux_method="upwind"):
+        '''
+        Convert mesh data to solver environment containers (Cells, Faces, Nodes).
+
+        Parameters
+        ----------
+        dynamics : object
+            Dynamics object for the solver.
+
+        Returns
+        -------
+        tuple
+            (cells, faces, nodes) environment containers.
+        '''
+        cells = Cells(self.cells.shape[0], dynamics)
+        # Convert all arrays to jax arrays before assignment
+        cells.face_indices = jnp.array(self.cell_face_indices,dtype=jnp.int32)
+        cells.face_normals = jnp.array(self.cell_face_normal_signs,dtype=jnp.int32)
+
+        match flux_method:
+            case "upwind":
+                faces = Faces(self.faces.shape[0], dynamics)
+
+                faces.n = jnp.array(self.face_normals,dtype=jnp.float64)
+                faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * 50
+                faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
+                faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
+                faces.stencil_dists = jnp.array(self.face_cell_center_distances,dtype=jnp.float64)*50
+            case _:
+                raise ValueError(f"Unsupported flux method: {flux_method}")
+
+        nodes = Nodes(self.points.shape[0], dynamics)
+
+        nodes.cells_index = jnp.array(self.point_cell_indices,dtype=jnp.int32)
+        nodes.cell_dists = jnp.array(self.point_cell_center_distances,dtype=jnp.float64)
+        nodes.cell_dists = nodes.cell_dists.at[jnp.where(nodes.cell_dists > 0)].set(nodes.cell_dists[jnp.where(nodes.cell_dists > 0)] * 50)
+        nodes.type = jnp.zeros_like(self.point_markers[..., np.newaxis], dtype=jnp.int32)
+
+        # The following lines assume self.points is a numpy array, so convert to jax for indexing
+        points_jax = jnp.array(self.points)
+        nodes.type = nodes.type.at[points_jax[:, 1] == 2].set(1)
+        nodes.type = nodes.type.at[points_jax[:, 1] == 0].set(1)
+        nodes.type = nodes.type.at[points_jax[:, 0] == 2].set(1)
+        nodes.type = nodes.type.at[points_jax[:, 0] == 0].set(1)
+
+        nodes.vel = nodes.vel.at[points_jax[:,1] == 2].set(jnp.array([.1, 0]))
+        nodes.vel = nodes.vel.at[points_jax[:,0] == 2].set(jnp.array([0, 0]))
+        nodes.vel = nodes.vel.at[points_jax[:,0] == 0].set(jnp.array([0, 0]))
+
+
+        return cells, faces, nodes
+
+    # --- Mesh quality and stencil verification ---
     def verify_stencil_geometry(self):
+        '''
+        Verify mesh stencil geometry by checking face normal alignment, distance errors, and face center offsets.
+        Reports summary statistics and counts of problematic faces.
+        '''
         bad_angle_count = 0
         bad_distance_count = 0
+        bad_offset_count = 0
         angles = []
         distance_errors = []
         offsets = []
         center_dist_vs_face_dist = []
+        percent_distance_errors = []
+        percent_offsets = []
         for i, (face, n, cells, dists) in enumerate(zip(
                 self.faces, self.face_normals, self.face_cell_indices, self.face_cell_center_distances)):
             c0, c1 = cells
@@ -380,7 +448,10 @@ class Mesher():
             d_sum = dists[0] + dists[1]
             distance_error = np.abs(d_proj - d_sum)
             distance_errors.append(distance_error)
-            if distance_error > 1e-2:  # threshold for bad distance
+            face_length = self.face_lengths[i]
+            percent_distance_error = 100.0 * distance_error / face_length if face_length > 0 else 0.0
+            percent_distance_errors.append(percent_distance_error)
+            if percent_distance_error > 1.0:  # threshold for bad percent error
                 bad_distance_count += 1
 
             # Face center offset check
@@ -388,8 +459,10 @@ class Mesher():
             midpoint = (center0 + center1) / 2.0
             offset = np.linalg.norm(face_center - midpoint)
             offsets.append(offset)
-            if offset > 1e-2:
-                print(f"Warning: Face {i} center offset from cell-center midpoint is {offset:.4e}")
+            percent_offset = 100.0 * offset / face_length if face_length > 0 else 0.0
+            percent_offsets.append(percent_offset)
+            if percent_offset > 10.0:
+                bad_offset_count += 1
 
             # Track cell center distance vs face distance sum
             center_dist = np.linalg.norm(center1 - center0)
@@ -399,6 +472,48 @@ class Mesher():
         print(f"Mean angle (deg): {np.mean(angles):.2f}, max: {np.max(angles):.2f}")
         print(f"Faces with angle > 30 deg: {bad_angle_count}")
         print(f"Mean distance error: {np.mean(distance_errors):.4f}, max: {np.max(distance_errors):.4f}")
-        print(f"Faces with distance error > 1e-2: {bad_distance_count}")
+        print(f"Mean distance error (% of face length): {np.mean(percent_distance_errors):.2f}%, max: {np.max(percent_distance_errors):.2f}%")
+        print(f"Faces with distance error > 1% of face length: {bad_distance_count}")
         print(f"Mean face center offset: {np.mean(offsets):.4e}, max: {np.max(offsets):.4e}")
+        print(f"Mean face center offset (% of face length): {np.mean(percent_offsets):.2f}%, max: {np.max(percent_offsets):.2f}%")
+        print(f"Faces with face center offset > 10% of face length: {bad_offset_count}")
         print(f"Mean (cell center dist - face dist sum): {np.mean(center_dist_vs_face_dist):.4e}, max: {np.max(center_dist_vs_face_dist):.4e}, min: {np.min(center_dist_vs_face_dist):.4e}")
+
+    # --- Stencil and angle calculations ---
+    def calc_stencil_norms(self):
+        '''
+        For each face, calculate the stencil norm:
+        - For interior faces (with two adjacent cells), the normalized vector from cell0 center to cell1 center.
+        - For boundary faces (with one adjacent cell), the normalized vector from the cell center to the face center.
+        Stores result in self.stencil_norms (shape: [num_faces, 2])
+        '''
+        stencil_norms = np.zeros_like(self.face_normals)
+        for i, (cells, face) in enumerate(zip(self.face_cell_indices, self.faces)):
+            c0, c1 = cells
+            if c0 != -1 and c1 != -1:
+                # Interior face: vector from c0 to c1
+                v = self.cell_centers[c1] - self.cell_centers[c0]
+            else:
+                # Boundary face: vector from cell center to face center
+                c = c0 if c0 != -1 else c1
+                v = self.face_centers[i] - self.cell_centers[c]
+            norm = np.linalg.norm(v)
+            if norm > 0:
+                stencil_norms[i] = v / norm
+            else:
+                stencil_norms[i] = v  # zero vector if degenerate
+        self.stencil_norms = stencil_norms
+
+    def calc_face_stencil_angles(self):
+        '''
+        For each face, calculate the angle (in radians) between the face normal and the stencil norm.
+        Stores result in self.face_stencil_angles (shape: [num_faces,])
+        '''
+        if not hasattr(self, 'stencil_norms'):
+            self.calc_stencil_norms()
+        face_norms = self.face_normals / np.linalg.norm(self.face_normals, axis=1, keepdims=True)
+        stencil_norms = self.stencil_norms / np.linalg.norm(self.stencil_norms, axis=1, keepdims=True)
+        dots = np.einsum('ij,ij->i', face_norms, stencil_norms)
+        dots = np.clip(dots, -1.0, 1.0)
+        angles = np.arccos(dots)  # radians
+        self.face_stencil_angles = angles
