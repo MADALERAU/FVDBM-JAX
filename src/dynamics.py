@@ -93,8 +93,10 @@ class D2Q13(Dynamics):
                      [0,-2]])# bottom-double size
     W = jnp.array([3/8,1/12,1/12,1/12,1/12,1/16,1/16,1/16,1/16,1/96,1/96,1/96,1/96])
     C = 1/jnp.sqrt(2)
-    def __init__(self):
+    def __init__(self,tau,delta_t):
         super().__init__()
+        self.tau = tau
+        self.delta_t = delta_t
     
     def calc_eq(self,rho: ArrayLike,vel:ArrayLike):
         return self.W*rho*(1+(jnp.dot(self.KSI,vel))/(self.C**2)+(jnp.dot(self.KSI,vel))**2/(2*self.C**4)-(jnp.dot(vel,vel))/(2*self.C**2)+(jnp.dot(self.KSI,vel))**3/(2*self.C**6)-3*(jnp.dot(self.KSI,vel))*(jnp.dot(vel,vel))/(2*self.C**4))

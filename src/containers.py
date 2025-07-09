@@ -137,6 +137,9 @@ class Faces(Container):
     '''
     Class for Faces in the FVDBM solver.
     Inherits from Container and initializes with the dynamics.
+
+    Utilizes a first order upwind/downwind scheme for flux calculations.
+
     *** Faces.pdf is treated as flux in the FVDBM solver. ***
     '''
     def __init__(self, size, dynamics: Dynamics):
