@@ -24,7 +24,7 @@ class MeshRefiner:
     mesh : meshpy.triangle.MeshInfo or compatible mesh object
         The mesh to be refined and improved.
     """
-    def __init__(self, mesh):
+    def __init__(self, mesh,holes=None):
         """
         Initialize the MeshRefiner with a mesh object.
 
@@ -34,6 +34,7 @@ class MeshRefiner:
             The mesh to be refined and improved.
         """
         self.mesh = mesh
+        self.holes = holes
 
     # --- Quality metrics and reporting ---
     @staticmethod
@@ -258,6 +259,8 @@ class MeshRefiner:
             info = triangle.MeshInfo()
             info.set_points(self.mesh.points)
             info.set_facets(self.mesh.facets)
+            if self.holes is not None and len(self.holes) > 0:
+                info.set_holes(self.holes)
             self.mesh = triangle.build(
                 info,
                 min_angle=30,
@@ -358,6 +361,8 @@ class MeshRefiner:
         info = triangle.MeshInfo()
         info.set_points(points.tolist())
         info.set_facets(self.mesh.facets)
+        if self.holes is not None and len(self.holes) > 0:
+            info.set_holes(self.holes)
         self.mesh = triangle.build(
             info,
             min_angle=30,
@@ -458,6 +463,8 @@ class MeshRefiner:
         info = triangle.MeshInfo()
         info.set_points([tuple(pt) for pt in points])
         info.set_facets(self.mesh.facets)
+        if self.holes is not None and len(self.holes) > 0:
+            info.set_holes(self.holes)
         self.mesh = triangle.build(
             info,
             min_angle=30,
@@ -675,6 +682,8 @@ class MeshRefiner:
                 info = triangle.MeshInfo()
                 info.set_points(points)
                 info.set_facets(facets)
+                if self.holes is not None and len(self.holes) > 0:
+                    info.set_holes(self.holes)
                 self.mesh = triangle.build(
                     info,
                     min_angle=30,
@@ -690,6 +699,8 @@ class MeshRefiner:
                 info = triangle.MeshInfo()
                 info.set_points(points)
                 info.set_facets(facets)
+                if self.holes is not None and len(self.holes) > 0:
+                    info.set_holes(self.holes)
                 self.mesh = triangle.build(
                     info,
                     min_angle=30,
@@ -704,7 +715,7 @@ class MeshRefiner:
                 self.angle_based_smooth(iterations=1)
             iter_time = time.time() - t0
             if verbose:
-                print(f"Iteration {it}: {len(bad_cells)} bad triangles, max skewness: {max_skew:.2f}, elements: {num_elements}, elapsed: {iter_time:.3f}s")
+                print(f"Iteration {it+1}: {len(bad_cells)} bad triangles, max skewness: {max_skew:.2f}, elements: {num_elements}, elapsed: {iter_time:.3f}s")
         if verbose:
             print(f"Element counts per iteration: {element_counts}")
         return self.mesh

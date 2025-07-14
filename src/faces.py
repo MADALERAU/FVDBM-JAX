@@ -39,7 +39,7 @@ class CCStencilFaces(Faces):
         return obj
     
     def calc_fluxes(self, cells, nodes):
-        self.pdf = jax.vmap(self.calc_flux,in_axes=(None,None,0,0,0,0,0))(
+        self.pdf = jax.vmap(self.calc_flux,in_axes=(None,None,0,0,0,0,0,0))(
             cells,
             nodes,
             self.stencil_cells_index,
@@ -61,7 +61,6 @@ class CCStencilFaces(Faces):
                   alpha):
         
         flux = super().calc_flux(cells,nodes,cells_index,cell_dists,nodes_index,n,L)
-
         flux = flux*jnp.cos(alpha)
 
         return flux
