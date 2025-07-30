@@ -142,7 +142,7 @@ class Faces(Container):
 
     *** Faces.pdf is treated as flux in the FVDBM solver. ***
     '''
-    def __init__(self, size, dynamics: Dynamics):
+    def __init__(self, size, dynamics: Dynamics,flux_scheme: str = "upwind"):
         super().__init__(size, dynamics) # treats PDF as flux
 
         #Static
@@ -151,6 +151,7 @@ class Faces(Container):
         self.stencil_dists = CustomArray(size, dtype=jnp.float32, default_value=-1)
         self.n = jnp.zeros((size, dynamics.DIM), dtype=jnp.float32)
         self.L = jnp.zeros((size, 1), dtype=jnp.float32)
+        self.flux_scheme = flux_scheme
 
     def init(self):
         '''
@@ -169,6 +170,8 @@ class Faces(Container):
         aux_data["stencil_dists"] = self.stencil_dists
         aux_data["n"] = self.n
         aux_data["L"] = self.L
+        aux_data["flux_scheme"] = self.flux_scheme
+
         return children, aux_data
 
     @classmethod
@@ -180,6 +183,7 @@ class Faces(Container):
         obj.stencil_dists = aux_data["stencil_dists"]
         obj.n = aux_data["n"]
         obj.L = aux_data["L"]
+        obj.flux_scheme = aux_data["flux_scheme"]
 
         return obj
     
@@ -189,7 +193,15 @@ class Faces(Container):
         Calculates the fluxes for all faces based on the cells and nodes.
         Uses JAX's vmap for vectorized computation.
         '''
-        self.pdf = jax.vmap(self.calc_flux,in_axes=(None,None,0,0,0,0,0))(
+        match self.flux_scheme:
+            case "upwind":
+                calc_flux = self.calc_upwind_flux
+            case "lax_wendroff":
+                calc_flux = self.calc_lax_wendroff_flux
+            case _:
+                raise ValueError(f"Unknown flux scheme: {self.flux_scheme}")
+        
+        self.pdf = jax.vmap(calc_flux,in_axes=(None,None,0,0,0,0,0))(
             cells,
             nodes,
             self.stencil_cells_index,
@@ -199,7 +211,7 @@ class Faces(Container):
             self.L
         )
     
-    def calc_flux(self,
+    def calc_upwind_flux(self,
                        cells:Cells,
                        nodes:Nodes,
                        cells_index,
@@ -224,6 +236,44 @@ class Faces(Container):
 
         flux = pdf*norm*L
 
+        return flux
+    
+    def calc_lax_wendroff_flux(self,
+                       cells:Cells,
+                       nodes:Nodes,
+                       cells_index,
+                       cell_dists,
+                       nodes_index,
+                       n,
+                       L):
+        '''
+        Calculates the flux for a face using the general Lax-Wendroff scheme (see screenshot equation).
+        '''
+        # Upwind and Downwind cell indices
+        upwind_idx = cells_index[0]
+        downwind_idx = cells_index[1]
+
+        # Handle ghost cells
+        pdf_U = jax.lax.select(upwind_idx == -1,
+                               self.calc_ghost(cells, nodes, nodes_index, downwind_idx, cell_dists[0], cell_dists[1]),
+                               cells.get_pdf(upwind_idx))
+        pdf_D = jax.lax.select(downwind_idx == -1,
+                               self.calc_ghost(cells, nodes, nodes_index, upwind_idx, cell_dists[1], cell_dists[0]),
+                               cells.get_pdf(downwind_idx))
+
+        # Distances
+        x_C_minus_x_U = cell_dists[0]  # upwind cell center to face center (positive)
+        x_D_minus_x_U = cell_dists[0] + cell_dists[1]  # upwind to downwind cell center (positive)
+
+        # Characteristic speed and time step
+        varpi = jnp.dot(self.dynamics.KSI, n)
+        delta_t = self.dynamics.delta_t
+
+        # Lax-Wendroff interpolation using explicit upwind/downwind ordering and positive distances
+        interp = (x_C_minus_x_U / x_D_minus_x_U) - (varpi * delta_t) / (2 * x_D_minus_x_U)
+        pdf_C = pdf_U + (pdf_D - pdf_U) * interp
+        # Flux
+        flux = pdf_C * varpi * L
         return flux
 
     def calc_ghost(self,cells:Cells,nodes: Nodes,nodes_index,known_cell_ind,ghost_cell_dist,known_cell_dist):

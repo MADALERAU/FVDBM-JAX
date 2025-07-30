@@ -17,8 +17,8 @@ class CCStencilFaces(Faces):
 
     ### Notes: ###
     """
-    def __init__(self,size,dynamics: Dynamics):
-        super().__init__(size, dynamics)
+    def __init__(self,size,dynamics: Dynamics,flux_scheme = 'upwind'):
+        super().__init__(size, dynamics,flux_scheme=flux_scheme)
         self.alpha = jnp.zeros((size,1),dtype=jnp.float32)  # Angle between n and n_PQs
 
     def init(self):
@@ -59,8 +59,15 @@ class CCStencilFaces(Faces):
                   n,
                   L,
                   alpha):
+        match self.flux_scheme:
+            case 'upwind':
+                calc_flux = self.calc_upwind_flux
+            case 'lax_wendroff':
+                calc_flux = self.calc_lax_wendroff_flux
+            case _:
+                raise ValueError(f"Unknown flux scheme: {self.flux_scheme}")
         
-        flux = super().calc_flux(cells,nodes,cells_index,cell_dists,nodes_index,n,L)
+        flux = calc_flux(cells,nodes,cells_index,cell_dists,nodes_index,n,L)
         flux = flux*jnp.cos(alpha)
 
         return flux

@@ -411,9 +411,26 @@ class Mesher():
                 faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
                 faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
                 faces.stencil_dists = jnp.array(self.face_cell_center_distances,dtype=jnp.float64)*50
+            case "lax_wendroff":
+                faces = Faces(self.faces.shape[0], dynamics,flux_scheme='lax_wendroff')
 
-            case "cc":
+                faces.n = jnp.array(self.face_normals,dtype=jnp.float64)
+                faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * 50
+                faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
+                faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
+                faces.stencil_dists = jnp.array(self.face_cell_center_distances,dtype=jnp.float64)*50
+            case "cc_upwind":
                 faces = CCStencilFaces(self.faces.shape[0], dynamics)
+
+                faces.n = jnp.array(self.stencil_norms,dtype=jnp.float64)
+                faces.alpha = jnp.array(self.face_stencil_angles,dtype=jnp.float64)[...,jnp.newaxis]
+                faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * 50
+                faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
+                faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
+                # Use the stencil-based distances for the stencil scheme
+                faces.stencil_dists = jnp.array(self.cc_stencil_dist,dtype=jnp.float64)*50
+            case "cc_lax_wendroff":
+                faces = CCStencilFaces(self.faces.shape[0], dynamics,flux_scheme = 'lax_wendroff')
 
                 faces.n = jnp.array(self.stencil_norms,dtype=jnp.float64)
                 faces.alpha = jnp.array(self.face_stencil_angles,dtype=jnp.float64)[...,jnp.newaxis]
@@ -432,7 +449,8 @@ class Mesher():
         nodes.cell_dists = nodes.cell_dists.at[jnp.where(nodes.cell_dists > 0)].set(nodes.cell_dists[jnp.where(nodes.cell_dists > 0)] * 50)
         nodes.type = jnp.zeros_like(self.point_markers[..., np.newaxis], dtype=jnp.int32)
 
-        # The following lines assume self.points is a numpy array, so convert to jax for indexing
+        # Temporary: Set node types based on point coordinates
+        # This is a placeholder and should be replaced with actual logic for setting node types
         points_jax = jnp.array(self.points)
         nodes.type = nodes.type.at[points_jax[:, 1] == 2].set(1)
         nodes.type = nodes.type.at[points_jax[:, 1] == 0].set(1)
