@@ -25,7 +25,8 @@ class Container():
         '''
         Initializes the Container with a given size and dynamics
         '''
-        self.pdf = jnp.ones((size, dynamics.NUM_QUIVERS), dtype=jnp.float32)
+        #self.pdf = jnp.ones((size, dynamics.NUM_QUIVERS), dtype=jnp.float32)
+        self.pdf = jnp.repeat(dynamics.calc_eq(1,jnp.asarray([0,0]))[jnp.newaxis],size,axis=0)
         self.dynamics = dynamics
 
     # JAX flattening and unflattening functions for Container
@@ -337,14 +338,19 @@ class Nodes(Container):
     
     def calc_pdfs(self,cells:Cells):
         self.calc_vel_pdfs(cells)
+        self.calc_rho_pdfs(cells)
+
+    def calc_rho_pdfs(self,cells:Cells):
+        indices = jnp.arange(self.pdf.shape[0])
+        self.vel = jnp.where(self.type==2,jax.vmap(self.calc_velocity,in_axes=(None,0))(cells, indices), self.vel)
+        self.pdf = jnp.where(self.type==2,jax.vmap(self.calc_dirichlet_pdf,in_axes=(None,0))(cells, indices), self.pdf)
 
     def calc_vel_pdfs(self,cells:Cells):
         indices = jnp.arange(self.pdf.shape[0]) # Assuming type 1 is for velocity nodes
         self.rho = jnp.where(self.type==1,jax.vmap(self.calc_density,in_axes=(None,0))(cells, indices), self.rho)
+        self.pdf = jnp.where(self.type==1,jax.vmap(self.calc_dirichlet_pdf,in_axes=(None,0))(cells, indices), self.pdf)
 
-        self.pdf = jnp.where(self.type==1,jax.vmap(self.calc_vel_pdf,in_axes=(None,0))(cells, indices), self.pdf)
-
-    def calc_vel_pdf(self,cells:Cells,index):
+    def calc_dirichlet_pdf(self,cells:Cells,index):
         rho = self.rho[index]
         vel = self.vel[index]
         pdf = self.dynamics.calc_eq(rho, vel)+self.calc_neq(cells,index)
@@ -360,6 +366,12 @@ class Nodes(Container):
         Calculates the density of the node given its index.
         '''
         return extrapolate(self.get_cell_rhos(self.cells_index[index], cells),self.cell_dists[index])
+    
+    def calc_velocity(self,cells:Cells,index):
+        '''
+        Calculates the velocity of the node given its index.
+        '''
+        return extrapolate(self.get_cell_vels(self.cells_index[index], cells),self.cell_dists[index])
     
     def get_cell_neqs(self, cell_indices, cells: Cells):
         '''
