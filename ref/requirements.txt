@@ -1,0 +1,8 @@
+jax
+meshpy
+numpy
+pandas
+pdoc
+pyvista
+scipy
+tqdm
