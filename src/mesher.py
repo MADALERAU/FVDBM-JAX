@@ -14,6 +14,8 @@ from utils.utils import *
 from src.containers import *
 from src.dynamics import *
 from src.faces import *
+from src.environment import *
+import pickle
 
 class Mesher():
     '''
@@ -380,116 +382,6 @@ class Mesher():
         self.calc_face_stencil_angles()
         print(f"Face-stencil angles calculated. (Elapsed: {time.time()-t0:.3f}s)")
 
-    def to_env(self, dynamics, flux_method="upwind", dim_multiplier=1):
-        '''
-        Convert mesh data to solver environment containers (Cells, Faces, Nodes).
-
-        Parameters
-        ----------
-        dynamics : object
-            Dynamics object for the solver.
-
-        flux_method : str, optional
-            The flux method to use for the solver. Defaults to "upwind".
-            options: "upwind", "cc".
-
-        Returns
-        -------
-        tuple
-            (cells, faces, nodes) environment containers.
-        '''
-        cells = Cells(self.cells.shape[0], dynamics)
-        # Convert all arrays to jax arrays before assignment
-        cells.face_indices = jnp.array(self.cell_face_indices,dtype=jnp.int32)
-        cells.face_normals = jnp.array(self.cell_face_normal_signs,dtype=jnp.int32)
-
-        match flux_method:
-            case "upwind":
-                faces = Faces(self.faces.shape[0], dynamics)
-
-                faces.n = jnp.array(self.face_normals,dtype=jnp.float64)
-                faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * dim_multiplier
-                faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
-                faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
-                faces.stencil_dists = jnp.array(self.face_cell_center_distances,dtype=jnp.float64) * dim_multiplier
-            case "lax_wendroff":
-                faces = Faces(self.faces.shape[0], dynamics,flux_scheme='lax_wendroff')
-
-                faces.n = jnp.array(self.face_normals,dtype=jnp.float64)
-                faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * dim_multiplier
-                faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
-                faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
-                faces.stencil_dists = jnp.array(self.face_cell_center_distances,dtype=jnp.float64) * dim_multiplier
-            case "cc_upwind":
-                faces = CCStencilFaces(self.faces.shape[0], dynamics)
-
-                faces.n = jnp.array(self.stencil_norms,dtype=jnp.float64)
-                faces.alpha = jnp.array(self.face_stencil_angles,dtype=jnp.float64)[...,jnp.newaxis]
-                faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * dim_multiplier
-                faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
-                faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
-                # Use the stencil-based distances for the stencil scheme
-                faces.stencil_dists = jnp.array(self.cc_stencil_dist,dtype=jnp.float64) * dim_multiplier
-            case "cc_lax_wendroff":
-                faces = CCStencilFaces(self.faces.shape[0], dynamics,flux_scheme = 'lax_wendroff')
-
-                faces.n = jnp.array(self.stencil_norms,dtype=jnp.float64)
-                faces.alpha = jnp.array(self.face_stencil_angles,dtype=jnp.float64)[...,jnp.newaxis]
-                faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * dim_multiplier
-                faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
-                faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
-                # Use the stencil-based distances for the stencil scheme
-                faces.stencil_dists = jnp.array(self.cc_stencil_dist,dtype=jnp.float64) * dim_multiplier
-            case "cc_alt_upwind":
-                faces = CCStencilKsiFaces(self.faces.shape[0], dynamics)
-
-                faces.n = jnp.array(self.face_normals,dtype=jnp.float64)
-                faces.npq = jnp.array(self.stencil_norms,dtype=jnp.float64)
-                faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * dim_multiplier
-                faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
-                faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
-                faces.stencil_dists = jnp.array(self.face_cell_center_distances,dtype=jnp.float64) * dim_multiplier
-            case _:
-                raise ValueError(f"Unsupported flux method: {flux_method}")
-
-        nodes = Nodes(self.points.shape[0], dynamics)
-
-        nodes.cells_index = jnp.array(self.point_cell_indices,dtype=jnp.int32)
-        nodes.cell_dists = jnp.array(self.point_cell_center_distances,dtype=jnp.float64)
-        nodes.cell_dists = nodes.cell_dists.at[jnp.where(nodes.cell_dists > 0)].set(nodes.cell_dists[jnp.where(nodes.cell_dists > 0)] * dim_multiplier)
-        nodes.type = jnp.zeros_like(self.point_markers[..., np.newaxis], dtype=jnp.int32)
-
-        # # Temporary: Set node types based on point coordinates
-        # # This is a placeholder and should be replaced with actual logic for setting node types
-        # points_jax = jnp.array(self.points)
-        # nodes.type = nodes.type.at[points_jax[:, 1] == 2].set(1)
-        # nodes.type = nodes.type.at[points_jax[:, 1] == 0].set(1)
-        # nodes.type = nodes.type.at[points_jax[:, 0] == 2].set(1)
-        # nodes.type = nodes.type.at[points_jax[:, 0] == 0].set(1)
-
-        # nodes.vel = nodes.vel.at[points_jax[:,1] == 2].set(jnp.array([.1, 0]))
-        # nodes.vel = nodes.vel.at[points_jax[:,0] == 2].set(jnp.array([0, 0]))
-        # nodes.vel = nodes.vel.at[points_jax[:,0] == 0].set(jnp.array([0, 0]))
-
-
-        return cells, faces, nodes
-
-    def set_vel_node(self, nodes: Nodes, marker: int, velocity: jnp.ndarray):
-        assert velocity.shape == (nodes.dynamics.DIM,)
-        
-        nodes.type = nodes.type.at[self.point_markers == marker].set(1)
-        nodes.vel = nodes.vel.at[self.point_markers == marker].set(velocity)
-
-        return nodes
-    
-    def set_rho_node(self, nodes: Nodes, marker: int, rho: float):
-        assert rho > 0
-        
-        nodes.type = nodes.type.at[self.point_markers == marker].set(2)
-        nodes.rho = nodes.rho.at[self.point_markers == marker].set(rho)
-
-        return nodes
-
     # --- Mesh quality and stencil verification ---
     def verify_stencil_geometry(self):
         '''
@@ -666,5 +558,185 @@ class Mesher():
         self.face_stencil_angles = angles
 
     # Export methods
-    def to_vtk(self, env, filename: str):
-        pass
+    # Videos
+    def to_vtk(self, env: Environment, filename: str, save_f: bool = False, save_feq: bool = False):
+        '''Export mesh and env data to a VTK file. Uses PyVista for exporting.
+        
+        Parameters
+        ----------
+        env : Environment
+            Environment object containing cell data (velocity, density).
+        filename : str
+            Name of the output VTK file (without extension).
+            
+        Returns
+        -------
+        pv.UnstructuredGrid
+            PyVista UnstructuredGrid object containing the mesh and environment data.
+        '''
+
+        points = np.hstack([self.points,np.zeros_like(self.points[:,0:1])])
+
+        num_points = np.full_like(self.cells[:,0:1],fill_value=self.cells.shape[-1])
+        cells = np.hstack([num_points,self.cells])
+        cell_types = np.array([pv.CellType.TRIANGLE] * self.cells.shape[0])
+
+        vel = np.hstack([env.cells.vel,np.zeros_like(env.cells.vel[:,0:1])])
+        rho = np.array(env.cells.rho)
+
+        grid = pv.UnstructuredGrid(cells,cell_types,points)
+        grid["Velocity"] = vel
+        grid["Density"] = rho
+
+        if save_f:
+            grid["pdf"] = np.array(env.cells.pdf)
+        if save_feq:
+            grid["feq"] = np.array(env.cells.pdf_eq)
+
+        grid.save(f"{filename}.vtk")
+
+        return grid
+    
+    def to_pickle(self,env: Environment,filename:str):
+        with open(f"{filename}.pkl","wb") as f:
+            pickle.dump((env,self),f)
+
+    @classmethod
+    def from_pickle(cls,filename:str):
+        with open(f"{filename}.pkl","rb") as f:
+            env,mesh = pickle.load(f)
+        return env,mesh
+
+    def to_env(self, dynamics, flux_method="upwind", dim_multiplier=1):
+        '''
+        Convert mesh data to solver environment containers (Cells, Faces, Nodes).
+
+        Parameters
+        ----------
+        dynamics : object
+            Dynamics object for the solver.
+
+        flux_method : str, optional
+            The flux method to use for the solver. Defaults to "upwind".
+            options: "upwind", "cc".
+        
+        dim_multiplier : float, optional
+            Multiplier for dimensional scaling of distances. Defaults to 1.
+
+        Returns
+        -------
+        tuple
+            (cells, faces, nodes) environment containers.
+        '''
+
+        cells = Cells(self.cells.shape[0], dynamics)
+        # Convert all arrays to jax arrays before assignment
+        cells.face_indices = jnp.array(self.cell_face_indices,dtype=jnp.int32)
+        cells.face_normals = jnp.array(self.cell_face_normal_signs,dtype=jnp.int32)
+
+        match flux_method:
+            case "upwind":
+                faces = Faces(self.faces.shape[0], dynamics)
+
+                faces.n = jnp.array(self.face_normals,dtype=jnp.float64)
+                faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * dim_multiplier
+                faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
+                faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
+                faces.stencil_dists = jnp.array(self.face_cell_center_distances,dtype=jnp.float64) * dim_multiplier
+            case "lax_wendroff":
+                faces = Faces(self.faces.shape[0], dynamics,flux_scheme='lax_wendroff')
+
+                faces.n = jnp.array(self.face_normals,dtype=jnp.float64)
+                faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * dim_multiplier
+                faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
+                faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
+                faces.stencil_dists = jnp.array(self.face_cell_center_distances,dtype=jnp.float64) * dim_multiplier
+            case "cc_upwind":
+                faces = CCStencilFaces(self.faces.shape[0], dynamics)
+
+                faces.n = jnp.array(self.stencil_norms,dtype=jnp.float64)
+                faces.alpha = jnp.array(self.face_stencil_angles,dtype=jnp.float64)[...,jnp.newaxis]
+                faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * dim_multiplier
+                faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
+                faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
+                # Use the stencil-based distances for the stencil scheme
+                faces.stencil_dists = jnp.array(self.cc_stencil_dist,dtype=jnp.float64) * dim_multiplier
+            case "cc_lax_wendroff":
+                faces = CCStencilFaces(self.faces.shape[0], dynamics,flux_scheme = 'lax_wendroff')
+
+                faces.n = jnp.array(self.stencil_norms,dtype=jnp.float64)
+                faces.alpha = jnp.array(self.face_stencil_angles,dtype=jnp.float64)[...,jnp.newaxis]
+                faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * dim_multiplier
+                faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
+                faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
+                # Use the stencil-based distances for the stencil scheme
+                faces.stencil_dists = jnp.array(self.cc_stencil_dist,dtype=jnp.float64) * dim_multiplier
+            case "cc_alt_upwind":
+                faces = CCStencilKsiFaces(self.faces.shape[0], dynamics)
+
+                faces.n = jnp.array(self.face_normals,dtype=jnp.float64)
+                faces.npq = jnp.array(self.stencil_norms,dtype=jnp.float64)
+                faces.L = jnp.array(self.face_lengths,dtype=jnp.float64)[...,jnp.newaxis] * dim_multiplier
+                faces.nodes_index = jnp.array(self.faces,dtype=jnp.int32)
+                faces.stencil_cells_index = jnp.array(self.face_cell_indices,dtype=jnp.int32)
+                faces.stencil_dists = jnp.array(self.face_cell_center_distances,dtype=jnp.float64) * dim_multiplier
+            case _:
+                raise ValueError(f"Unsupported flux method: {flux_method}")
+
+        nodes = Nodes(self.points.shape[0], dynamics)
+
+        nodes.cells_index = jnp.array(self.point_cell_indices,dtype=jnp.int32)
+        nodes.cell_dists = jnp.array(self.point_cell_center_distances,dtype=jnp.float64)
+        nodes.cell_dists = nodes.cell_dists.at[jnp.where(nodes.cell_dists > 0)].set(nodes.cell_dists[jnp.where(nodes.cell_dists > 0)] * dim_multiplier)
+        nodes.type = jnp.zeros_like(self.point_markers[..., np.newaxis], dtype=jnp.int32)
+
+        return cells, faces, nodes
+
+
+    # Boundary Conditions
+    def set_vel_node(self, nodes: Nodes, marker: int, velocity: jnp.ndarray):
+        '''Set the velocity for nodes with a specific marker.
+        
+        Parameters
+        ----------
+        nodes : Nodes
+            Nodes object to update.
+        marker : int
+            Marker to identify the nodes to update.
+        velocity : jnp.ndarray
+            Velocity vector to set for the nodes with the specified marker.
+
+        Returns
+        -------
+        Nodes
+            Updated Nodes object with the specified velocity set for the nodes with the given marker.
+        '''
+        assert velocity.shape == (nodes.dynamics.DIM,)
+        
+        nodes.type = nodes.type.at[self.point_markers == marker].set(1)
+        nodes.vel = nodes.vel.at[self.point_markers == marker].set(velocity)
+
+        return nodes
+    
+    def set_rho_node(self, nodes: Nodes, marker: int, rho: float):
+        '''Set the density for nodes with a specific marker.
+        Parameters
+        ----------
+        nodes : Nodes
+            Nodes object to update.
+        marker : int
+            Marker to identify the nodes to update.
+        rho : float
+            Density value to set for the nodes with the specified marker.
+
+        Returns
+        -------
+        Nodes
+            Updated Nodes object with the specified density set for the nodes with the given marker.
+        '''
+        assert rho > 0
+        
+        nodes.type = nodes.type.at[self.point_markers == marker].set(2)
+        nodes.rho = nodes.rho.at[self.point_markers == marker].set(rho)
+
+        return nodes
