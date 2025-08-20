@@ -36,6 +36,9 @@ class MeshRefiner:
         self.mesh = mesh
         self.holes = holes
 
+        self.point_markers = np.copy(mesh.point_markers) if hasattr(mesh, 'point_markers') else None
+        self.facet_markers = np.copy(mesh.facet_markers) if hasattr(mesh, 'facet_markers') else None
+
     # --- Quality metrics and reporting ---
     @staticmethod
     def _aspect_ratio_single(cell_points):
@@ -257,8 +260,8 @@ class MeshRefiner:
                 flipped += 1
         if flipped > 0:
             info = triangle.MeshInfo()
-            info.set_points(self.mesh.points)
-            info.set_facets(self.mesh.facets)
+            info.set_points(self.mesh.points,self.point_markers)
+            info.set_facets(self.mesh.facets,self.facet_markers)
             if self.holes is not None and len(self.holes) > 0:
                 info.set_holes(self.holes)
             self.mesh = triangle.build(
@@ -269,6 +272,10 @@ class MeshRefiner:
                 attributes=True,
                 volume_constraints=True
             )
+            if hasattr(self.mesh, 'point_markers'):
+                self.point_markers = np.copy(self.mesh.point_markers)
+            if hasattr(self.mesh, 'facet_markers'):
+                self.facet_markers = np.copy(self.mesh.facet_markers)
             if verbose:
                 print(f"  Edge flips performed: {flipped}")
         return flipped
@@ -359,18 +366,22 @@ class MeshRefiner:
                     if min_angle > best_min_angle:
                         points[i] = candidate
         info = triangle.MeshInfo()
-        info.set_points(points.tolist())
-        info.set_facets(self.mesh.facets)
+        info.set_points(points.tolist(),self.point_markers)
+        info.set_facets(self.mesh.facets,self.facet_markers)
         if self.holes is not None and len(self.holes) > 0:
             info.set_holes(self.holes)
-        self.mesh = triangle.build(
-            info,
-            min_angle=30,
-            generate_faces=True,
-            generate_neighbor_lists=True,
-            attributes=True,
-            volume_constraints=True
-        )
+            self.mesh = triangle.build(
+                info,
+                min_angle=30,
+                generate_faces=True,
+                generate_neighbor_lists=True,
+                attributes=True,
+                volume_constraints=True
+            )
+            if hasattr(self.mesh, 'point_markers'):
+                self.point_markers = np.copy(self.mesh.point_markers)
+            if hasattr(self.mesh, 'facet_markers'):
+                self.facet_markers = np.copy(self.mesh.facet_markers)
 
     def selective_refine(self, points, facets, cells, aspect_thresh, skew_thresh, min_area, max_refine=10):
         """
@@ -461,18 +472,22 @@ class MeshRefiner:
             for simplex in delaunay.simplices:
                 new_elements = np.vstack([new_elements, [patch_pts_idx[i] for i in simplex]])
         info = triangle.MeshInfo()
-        info.set_points([tuple(pt) for pt in points])
-        info.set_facets(self.mesh.facets)
+        info.set_points([tuple(pt) for pt in points], self.point_markers)
+        info.set_facets(self.mesh.facets,self.facet_markers)
         if self.holes is not None and len(self.holes) > 0:
             info.set_holes(self.holes)
-        self.mesh = triangle.build(
-            info,
-            min_angle=30,
-            generate_faces=True,
-            generate_neighbor_lists=True,
-            attributes=True,
-            volume_constraints=True
-        )
+            self.mesh = triangle.build(
+                info,
+                min_angle=30,
+                generate_faces=True,
+                generate_neighbor_lists=True,
+                attributes=True,
+                volume_constraints=True
+            )
+            if hasattr(self.mesh, 'point_markers'):
+                self.point_markers = np.copy(self.mesh.point_markers)
+            if hasattr(self.mesh, 'facet_markers'):
+                self.facet_markers = np.copy(self.mesh.facet_markers)
         if verbose:
             print(f"Patch remeshed: {len(patch_tris)} triangles replaced.")
 
@@ -569,8 +584,10 @@ class MeshRefiner:
                     new_elements.append(new_tri)
             # Rebuild mesh
             info = triangle.MeshInfo()
-            info.set_points([tuple(pt) for pt in unique_points])
-            info.set_facets(self.mesh.facets)
+            info.set_points([tuple(pt) for pt in unique_points],self.point_markers)
+            info.set_facets(self.mesh.facets,self.facet_markers)
+            if self.holes is not None:
+                info.set_holes(self.holes)
             self.mesh = triangle.build(
                 info,
                 min_angle=30,
@@ -579,6 +596,10 @@ class MeshRefiner:
                 attributes=True,
                 volume_constraints=True
             )
+            if hasattr(self.mesh, 'point_markers'):
+                self.point_markers = np.copy(self.mesh.point_markers)
+            if hasattr(self.mesh, 'facet_markers'):
+                self.facet_markers = np.copy(self.mesh.facet_markers)
             if verbose:
                 print(f"Coarsening iteration {it+1}: {len(short_edges)} edges collapsed.")
         return self.mesh
@@ -680,25 +701,28 @@ class MeshRefiner:
                 points = self.laplacian_smooth(points, facets, iterations=2)
             if global_remesh_interval and (it+1) % global_remesh_interval == 0:
                 info = triangle.MeshInfo()
-                info.set_points(points)
-                info.set_facets(facets)
+                info.set_points(points,self.point_markers)
+                info.set_facets(facets,self.facet_markers)
                 if self.holes is not None and len(self.holes) > 0:
                     info.set_holes(self.holes)
                 self.mesh = triangle.build(
                     info,
                     min_angle=30,
-                    max_volume=max_volume,
                     generate_faces=True,
                     generate_neighbor_lists=True,
                     attributes=True,
                     volume_constraints=True
                 )
+                if hasattr(self.mesh, 'point_markers'):
+                    self.point_markers = np.copy(self.mesh.point_markers)
+                if hasattr(self.mesh, 'facet_markers'):
+                    self.facet_markers = np.copy(self.mesh.facet_markers)
                 if verbose:
                     print(f"Global remeshing performed at iteration {it+1}")
             else:
                 info = triangle.MeshInfo()
-                info.set_points(points)
-                info.set_facets(facets)
+                info.set_points(points,self.point_markers)
+                info.set_facets(facets,self.facet_markers)
                 if self.holes is not None and len(self.holes) > 0:
                     info.set_holes(self.holes)
                 self.mesh = triangle.build(
@@ -709,6 +733,10 @@ class MeshRefiner:
                     attributes=True,
                     volume_constraints=True
                 )
+                if hasattr(self.mesh, 'point_markers'):
+                    self.point_markers = np.copy(self.mesh.point_markers)
+                if hasattr(self.mesh, 'facet_markers'):
+                    self.facet_markers = np.copy(self.mesh.facet_markers)
             if edge_flipping:
                 self.flip_edges(verbose=verbose)
             if angle_smoothing:
