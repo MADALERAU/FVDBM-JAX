@@ -2,7 +2,7 @@
 Finite Volume Discrete Boltzmann Method Solver 
 
 ## Getting Started
-The src module contains all core components of the FVDBM solver, with additional utility methods in the utils module.
+The src module contains all core components of the FVDBM solver, with additional utility methods in the utils module. Please refer to [`ref/requirements.txt`](ref/requirements.txt) for all python dependencies.
 
 The setup/solving process can be seperated into three sections: 
 - mesh generation
